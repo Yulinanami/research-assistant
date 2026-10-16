@@ -1,0 +1,56 @@
+@startuml
+!pragma layout smetana
+top to bottom direction
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 16
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam nodesep 45
+skinparam ranksep 55
+skinparam rectangle {
+  BackgroundColor #EDF4FC
+  BorderColor #6987A9
+  FontColor #20344E
+}
+skinparam ArrowColor #53657D
+
+rectangle "需求定义与数据规划\n用途、来源、规模、质量标准" as A
+rectangle "数据采集\n文件上传、条目导入、数据库、论文采集" as B
+rectangle "原始资料库" as C
+rectangle "PDF解析：MinerU\n其他格式或替代解析：\nDocling候选" as D
+rectangle "已整理的文本与待标注数据" as E
+rectangle "按需清洗与标准化\nData-Juicer" as F
+rectangle "知识片段生成\nEasy Dataset文档分块" as G
+rectangle "问答生成、增强与人工修改\nEasy Dataset" as H
+rectangle "文本与图像人工标注\nLabel Studio" as I
+rectangle "问答评分、修订与答案优劣评价\nArgilla 或配置后的Label Studio" as J
+rectangle "统一质量审核" as K
+rectangle "数据集版本发布\n目录、权限、申请、下载与API" as L
+rectangle "论文信息提取与知识关联\n摘要、概念、关联、索引" as M
+rectangle "科研助手\n问答、对比、综述、趋势与推荐" as N
+rectangle "训练或评测数据" as O
+rectangle "外部模型训练与评测服务" as P
+
+A --> B
+B --> C
+C --> D
+C --> E
+D --> F
+E --> F
+D --> G : 无需清洗时
+F --> G
+G --> H
+F --> I
+H --> J : 需要单独评分时
+H --> K
+I --> K
+J --> K
+K -[#B77935,dashed]-> H : 退回修改
+K --> L
+L --> M
+M --> N
+L --> O
+O --> P
+P -[#B77935,dashed]-> A : 发现问题并补充数据
+@enduml
