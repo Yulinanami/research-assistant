@@ -1,25 +1,19 @@
 # Argilla 开源知识数据加工平台调研报告
 
-调研日期：2026-10-14。调研对象：本地仓库 `D:\myprojects\调研的开源项目\argilla`，分析提交 `5338519accb13ae422f8bf9c0642651c249c49af`。SDK、Server 与前端声明 **2.8.0dev0**；最新正式 Release 为 **v2.8.0**。本报告主要分析 **Argilla v2 的标注数据集**，不将 `argilla-v1` 和历史任务专用接口的全部能力算入 v2。
-
-本次依据源码、官方文档与 GitHub 数据，对照《科研助手平台+数据知识加工平台需求规格说明书 V2》进行静态调研。未安装运行 Argilla、搜索引擎或模型，未创建用户/数据集、上传资料或推送 Hugging Face Hub；“支持”表示有实现或官方说明，不代表已验证农业资料、标注效率、部署性能和完整业务流程。外部 Distilabel 与训练框架仅分析接口关系，不作为本次实测。
-
 ## 3.1.1 基本信息
 
 | 项目 | 内容 |
 | --- | --- |
 | 平台名称 | Argilla；面向 AI 工程师与领域专家的人机协作反馈数据工具。当前关注 v2 统一 Dataset/Record/Response 模型。 |
 | 主页/仓库地址 | [官方仓库](https://github.com/argilla-io/argilla)；[官方文档](https://docs.argilla.io/latest/)；[Hugging Face 项目账号](https://huggingface.co/argilla)。 |
-| 开发方/维护方 | 起源于 Recognai / Argilla 团队，2024 年加入 Hugging Face，可与 Hub/Spaces 连接。当前 README 说明原作者转向其它项目，不再新增功能，承诺按需修复并招募维护者；历史团队背景与当前维护状态分别看待。[团队公告][S7]、[C1] |
-| 开源协议 | **Apache-2.0**。实际采用按代码许可证和分发条件处理；外部模型、训练框架、托管服务及数据本身需分别核对授权。[许可证][C2] |
-| GitHub Stars | **5,149**，截至 2026-10-14 官方 API 查询，为动态指标。[仓库数据][S1] |
-| 首次发布时间 | 仓库创建于 **2021-04-28**；最早可查预发布为 **v0.1.0-beta.1，2021-04-30**，最早正式 Release 为 **v0.1.0，2021-06-14**。通过发布列表第二页核实，不将预发布与正式发布混为同一时间。[预发布][S9]、[正式发布][S2] |
-| 最近更新时间 | 默认分支 `develop` 最近提交为 **2025-08-05**，提交 `5338519a`，本地与本次查询结果一致；最新正式 Release 为 **v2.8.0，2025-03-11**。本地声明 dev 版本，不等于正式标签源码；不以仓库元数据或 Issue 新增时间替代代码更新时间。[最近提交][S3]、[最新发布][S4]、[C3]、[C4]、[C7] |
-| 开发语言 | SDK/Server 以 Python 为主，声明 Python `>=3.9`；前端为 TypeScript/JavaScript/Vue。SDK、Server、前端分别组织，`pip install argilla` 安装 SDK，不能据此认为完整服务已运行。[C5]、[C6]、[C7] |
-| 部署方式 | 自托管 Python Server、Docker/Compose、Hugging Face Spaces，仓库还有 Kubernetes 示例。服务使用 SQLite/PostgreSQL 保存业务对象，Elasticsearch/OpenSearch 提供索引与查询；后台任务可使用 Redis/RQ worker。当前 Compose 示例包括应用、worker、PostgreSQL、Elasticsearch 和 Redis。[C6]、[C36]、[C37] |
-| 维护活跃度 | **低。** 本地为非浅克隆，2026-07-14 至 HEAD 可达历史 **0 次提交**；线上默认分支也停留在 2025-08-05。近三个月未见新的正式 Release，最近三个版本为 2.7.0（2025-01-21）、2.7.1（02-06）、2.8.0（03-11）。最新 5 条非 PR Issue 查询时均开放、无公开评论，未观察到维护者回复。仓库尚未归档，但不能据此判断仍持续开发新功能。[C1]、[S1]、[S3]、[S5]、[S6] |
-
-**平台定位：** 通过配置标注问题、展示模型建议和收集多人评价来组织任务，适合文本 QA、生成式回答、回答排序与优劣选择、评分及文本实体等数据采集。相较通用图像区域标注工作台，它的重点更接近 LLM 数据筛选与人工评价；可帮助本项目准备训练和评价资料，但自动生成、农业清洗、正式审批与成果管理仍需其它模块。
+| 开发方/维护方 | Recognai（Hugging Face生态） |
+| 开源协议 | **Apache-2.0**。 |
+| GitHub Stars | 5.2k |
+| 首次发布时间 | 仓库创建于 **2021-04-28**；最早预发布为 **v0.1.0-beta.1，2021-04-30**，最早正式 Release 为 **v0.1.0，2021-06-14**。 |
+| 最近更新时间 | 默认分支最近提交为 **2025-08-05**；最新正式 Release 为 **v2.8.0，2025-03-11**。 |
+| 开发语言 | SDK/Server 以 Python 为主；前端为 TypeScript/JavaScript/Vue。 |
+| 部署方式 | Python Server、Docker/Compose、Hugging Face Spaces。服务使用 SQLite/PostgreSQL 存储，Elasticsearch/OpenSearch 提供索引与查询。 |
+| 维护活跃度 | **低。** 线上默认分支停留在 2025-08-05。近三个月未见新的正式 Release。 |
 
 ## 3.1.2 功能清单与功能说明
 
