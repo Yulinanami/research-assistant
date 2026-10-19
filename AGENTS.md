@@ -2,20 +2,20 @@
 
 ## Project Structure & Module Organization
 
-This repository holds research documents, not application code. `docs/开源平台调研工作计划.docx` defines the platform list, assignments, and deliverables. `docs/平台调研/开源平台调研模板.docx` is the report template; keep individual platform work under `docs/平台调研/<number>. <platform>/` (for example, `1. Easy dataset/EasyDataset.docx`). `docs/会议记录.md` records working agreements, and the requirements specification in `docs/` provides project context. There are currently no source, test, or asset directories.
+This repository holds research documents, not application code. `docs/` contains the work plan, requirements specification, and `会议记录.md`. Under `docs/平台调研/`, numbered folders hold reports for Easy Dataset, Data-Juicer, MinerU, Docling, Label Studio, and Argilla. `调研分析总结/` contains comparisons, workflows, conversion analysis, and demonstration commands; `数据加工调研目标和方法/` contains research objectives and methods. Use `开源平台调研模板.docx` as the report template.
 
 ## Research and Development Workflow
 
-There is no build, install, or local run command for this documentation-only repository. Read the work plan and report template before starting a platform. The plan calls for a final Markdown report for each platform; the existing EasyDataset Word file is a working draft. Use the template's sections for basic information, feature mapping, advantages, architecture, relationship to this project, and conclusions. Personally try the platform where practical, then use its official site and repository to verify claims. Record the source and observation date for changing facts such as stars, releases, and maintenance activity.
+There are no repository build, install, or test commands. Read the work plan, requirements, and report template before researching. Deliver reports as Markdown; Word documents provide templates and reference material. Keep demonstration commands and configurations in `docs/平台调研/调研分析总结/4.平台命令与配置.md`. Preserve commands exactly when collecting them; verify any requested changes against the relevant platform and environment.
 
 ## Writing Style & Naming Conventions
 
-Use descriptive headings and concise Chinese prose consistent with the existing documents. Keep platform names, repository URLs, and technical terms exact. Preserve the template's section order and terminology, including the column that maps features to this project's requirements. Name new platform folders with the numbered pattern already in use; keep related drafts in the same folder. Avoid committing Word temporary files named `~$*.docx`.
+Write concise Chinese using familiar, specific function names. Preserve platform names and technical terms. Strictly follow the template's section order and numbering, and preserve user-written basic information unless explicitly asked to change it. Map capabilities to requirement function names rather than bare requirement IDs. Keep reports under `docs/平台调研/<number>. <platform>/`, such as `1. Easy dataset/EasyDataset.md`. Avoid duplicate explanations and committing Word temporary files named `~$*.docx`.
 
 ## Validation
 
-No automated test framework or coverage target exists. Before submitting, check that each template section is complete, links and factual claims have sources, and comparisons distinguish observed behavior from inference. Open edited Word files to inspect tables and pagination. Run `git status --short` to review changed files and `git diff --check` to catch whitespace errors in tracked text files.
+No automated test framework, formatter, linter, or coverage target is configured. Distinguish hands-on observations, official documentation, source analysis, and inference; do not describe untested capabilities as verified. Cite sources and observation dates for changing facts. Check template completeness, links, and diagram rendering. Inspect tables and pagination when editing Word files. Use `git status --short` to review scope and `git diff --check` to catch whitespace errors.
 
 ## Commits & Pull Requests
 
-The visible Git history contains one commit, `添加: 计划文档`, so it does not establish a broad convention. Use a short, descriptive commit subject naming the document or platform. In a pull request, summarize the platform researched, source links, observation date, and any incomplete template fields. Include screenshots only when they support a specific interface or workflow finding.
+Existing commits use short Chinese subjects such as `添加: 平台调研文档` and `完善：平台调研基础信息`. Follow this pattern and name the affected document or platform. Pull requests should summarize changes, sources, observation dates, and incomplete findings. Include screenshots when they support a specific observation.
