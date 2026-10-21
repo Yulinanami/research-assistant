@@ -93,3 +93,18 @@ export function cleanImages(images, config) {
       simulated: true }
   })
 }
+
+
+// 将旧数据中的项目名称关联到项目实体，保留所有原始ID和版本关联。
+export function ensureProjects(data) {
+  data.projects ||= []
+  for (const dataset of data.datasets) {
+    let project = data.projects.find(p => p.id === dataset.projectId)
+    if (!project) project = data.projects.find(p => p.name === (dataset.project || '默认项目'))
+    if (!project) { project = { id: uid('project'), name: dataset.project || '默认项目', description: '科研资料与数据集建设', created: now() }; data.projects.push(project) }
+    dataset.projectId = project.id
+    dataset.project = project.name
+  }
+  if (!data.projects.some(p => p.id === data.activeProject)) data.activeProject = data.datasets.find(d => d.id === data.activeDataset)?.projectId || data.projects[0]?.id || ''
+  return data
+}

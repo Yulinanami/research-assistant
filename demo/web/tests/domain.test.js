@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { canDownload, createVersion, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords } from '../src/domain.js'
+import { canDownload, createVersion, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords, ensureProjects } from '../src/domain.js'
 
 test('下载授权必须属于当前用户和当前发布版本', () => {
   const version = { id: 'v1', status: '已发布' }
@@ -139,4 +139,19 @@ test('历史发布信息补录保留原发布时间、版本关联和内容', ()
   assert.equal(legacy.release.publishedAt, legacy.published)
   assert.equal(legacy.release.versionId, 'legacy')
   assert.equal(legacy.records[0].answer, '原内容')
+})
+
+
+test('旧项目迁移保留ID及授权，多数据集归属同一项目且重复迁移不变', () => {
+  const data = { datasets: [{ id: 'a', project: '科研' }, { id: 'b', project: '科研' }, { id: 'c' }], activeDataset: 'b', versions: [{ id: 'v', datasetId: 'a' }], requests: [{ versionId: 'v' }] }
+  ensureProjects(data)
+  assert.equal(data.projects.length, 2)
+  assert.equal(data.datasets[0].projectId, data.datasets[1].projectId)
+  assert.equal(data.activeProject, data.datasets[1].projectId)
+  assert.equal(data.datasets[2].project, '默认项目')
+  assert.equal(data.versions[0].id, 'v')
+  assert.equal(data.requests[0].versionId, 'v')
+  const ids = data.projects.map(p => p.id)
+  ensureProjects(data)
+  assert.deepEqual(data.projects.map(p => p.id), ids)
 })

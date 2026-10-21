@@ -10,12 +10,12 @@ const versionId = ref('')
 const index = ref(0)
 const records = ref([])
 const draftId = ref('')
-const labels = ref(['可用', '需修改', '不可用', '无法判断'])
+const labels = ref([...(state.preferences[state.role]?.labels || ['可用','需修改','不可用','无法判断'])])
 const prompt = ref('根据参考材料判断答案质量，建议标签并说明需要修改的内容。')
 const model = ref(state.models[0]?.id)
 const imageId = ref('')
 const boxLabel = ref('图')
-const boxLabels = ref(['图', '表', '公式'])
+const boxLabels = ref([...(state.preferences[state.role]?.boxLabels || ['图','表','公式'])])
 const boxes = ref([])
 const drawing = ref(null)
 const versions = computed(() => selectedVersions().filter(v => v.records.some(r => r.question) && (isDatasetVersion(v) || v.type === '自动标注')))
@@ -39,9 +39,9 @@ function save(submit = false) {
   if (!version || version.status !== '草稿') version = addVersion(state.activeDataset, output, tab.value, tab.value === '问答标注' ? base?.id || versionId.value : imageId.value)
   else version.records = JSON.parse(JSON.stringify(output))
   draftId.value = version.id
-  if (!task.value) { task.value = { id: uid('task'), datasetId: state.activeDataset, name: tab.value + '任务', type: tab.value, status: '标注中', progress: 0, created: now(), versionId: version.id, logs: ['人工标注'] }; state.tasks.unshift(task.value); task.value = state.tasks[0] }
+  if (!task.value) { task.value = { id: uid('task'), datasetId: state.activeDataset, name: `${state.datasets.find(d=>d.id===state.activeDataset)?.name} · ${tab.value} · ${new Date().toLocaleTimeString('zh-CN',{hour12:false})}`, type: tab.value, status: '标注中', progress: 0, created: now(), versionId: version.id, logs: ['人工标注'] }; state.tasks.unshift(task.value); task.value = state.tasks[0] }
   task.value.progress = tab.value === '图像标注' ? 100 : Math.round(records.value.filter(r => r.label).length / records.value.length * 100)
-  if (submit) { version.status = '待审核'; state.focusVersion = version.id; task.value.status = '已提交'; notify('标注已提交审核'); emit('navigate', 'review') } else notify('标注草稿已保存')
+  if (submit) { version.status = '待审核'; state.focusVersion = version.id; task.value.status = '已提交'; notify('标注已提交审核'); emit('navigate', 'versions') } else notify('标注草稿已保存')
 }
 function automatic() {
   if (!versionId.value || !model.value) return ElMessage.warning('请选择成果版本与模型')

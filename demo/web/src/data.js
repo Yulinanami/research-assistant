@@ -1,23 +1,25 @@
 export const navigation = [
-  { title: '工作空间', items: [{ id: 'home', title: '工作台', icon: 'House', subtitle: '科研数据，从资料到成果' }] },
-  { title: '数据加工', items: [
-    { id: 'planning', title: '数据集需求与规划', icon: 'FolderOpened', subtitle: '明确数据用途，建立数据集建设计划' },
-    { id: 'sources', title: '数据采集与语料管理', icon: 'UploadFilled', subtitle: '统一接入文档、表格和待标注数据' },
-    { id: 'processing', title: '数据预处理', icon: 'SetUp', subtitle: '解析文档，清洗并规范原始数据' },
-    { id: 'generation', title: '知识片段与问答生成', icon: 'MagicStick', subtitle: '从文档内容生成片段、问题与答案' },
-    { id: 'annotation', title: '数据标注', icon: 'EditPen', subtitle: '结合人工标注与模型建议，完善数据内容' },
-    { id: 'models', title: '模型使用与评测', icon: 'Cpu', subtitle: '配置模型，试用并比较回答效果' },
+  { title: '工作空间', items: [
+    { id: 'home', title: '首页', icon: 'House', subtitle: '发现科研数据，开始新的数据建设' },
+    { id: 'workbench', title: '工作台', icon: 'Monitor', subtitle: '打开项目，查看加工任务和统计' },
   ] },
-  { title: '数据治理与共享管理', items: [
-    { id: 'standards', title: '数据标准与字典', icon: 'Collection', subtitle: '统一术语、字段定义和数据处理规范' },
-    { id: 'review', title: '数据质量审核', icon: 'CircleCheck', subtitle: '检查成果质量，完成审核与修订' },
-    { id: 'versions', title: '数据成果与版本管理', icon: 'Files', subtitle: '查看加工成果，管理审核和发布版本' },
-    { id: 'catalog', title: '数据目录', icon: 'Grid', subtitle: '发现、预览并申请使用科研数据成果' },
-    { id: 'requests', title: '使用申请与审批', icon: 'DocumentChecked', subtitle: '申请使用数据，跟踪审批与授权结果' },
-    { id: 'permissions', title: '权限管理', icon: 'Lock', subtitle: '按角色、项目和数据等级设置访问权限' },
-    { id: 'services', title: '数据服务', icon: 'Connection', subtitle: '将已发布的数据成果提供为标准接口' },
-    { id: 'statistics', title: '数据与任务统计', icon: 'DataAnalysis', subtitle: '了解数据规模和加工任务进展' },
+  { title: '数据治理与共享', items: [
+    { id: 'catalog', title: '数据目录', icon: 'Collection', subtitle: '我的数据集与已获准使用的数据集' },
+    { id: 'plaza', title: '数据广场', icon: 'Grid', subtitle: '发现、预览并申请使用科研数据' },
+    { id: 'standards', title: '数据标准与字典', icon: 'Notebook', subtitle: '管理字段定义、术语和数据规范' },
+    { id: 'review', title: '数据质量审核', icon: 'CircleCheck', subtitle: '跨项目检查数据，完成审核与修订' },
+    { id: 'requests', title: '使用申请与审批', icon: 'DocumentChecked', subtitle: '跟踪使用申请、审批与授权结果' },
+    { id: 'services', title: '数据服务', icon: 'Connection', subtitle: '使用已发布版本的数据接口' },
   ] },
+]
+
+export const settingNavigation = [
+  { id: 'setting-models', title: '模型配置', icon: 'Cpu', subtitle: '管理可用模型，本演示不发送外部请求或保存真实密钥' },
+  { id: 'setting-evaluation', title: '模型评测', icon: 'DataAnalysis', subtitle: '导入评测内容，比较模型的模拟结果' },
+  { id: 'setting-parsing', title: '解析配置', icon: 'DocumentCopy', subtitle: '保存PDF、Word和Excel解析的默认选项' },
+  { id: 'setting-cleaning', title: '清洗模板', icon: 'Brush', subtitle: '配置新建清洗任务的默认处理步骤' },
+  { id: 'setting-labels', title: '标注与标签', icon: 'PriceTag', subtitle: '管理问答评价和图片区域标签' },
+  { id: 'setting-prompts', title: '受众与提示词', icon: 'ChatDotRound', subtitle: '管理不同受众的提示词模板' },
 ]
 
 export const researchText = '土壤含水量对作物生长的影响\n\n本试验于2026年10月在试验田开展，采样深度为0—20厘米。A组土壤质量含水率为20%，B组为25%。质量含水率为水分质量与干土质量之比。\n\n实验方法\n每组设置三个重复，在同一时间采样，使用烘干法测定土壤含水量。\n\n研究结果\nB组比A组高5个百分点。本试验没有记录作物产量，不能据此推断增产效果。'
@@ -37,7 +39,7 @@ export const sampleImage = `data:image/svg+xml;charset=utf-8,${encodeURIComponen
 export function initialData() {
   const created = '2026/10/20 09:30:00'
   return {
-    role: '管理员', activeDataset: 'soil', ui: {}, conversations: [], evaluations: [],
+    preferences: {}, role: '管理员', activeDataset: 'soil', ui: {}, conversations: [], evaluations: [],
     datasets: [
       { id: 'soil', name: '土壤含水量科研数据集', type: '问答对', scene: '土壤环境科研与问答', demand: '加工实验资料，为科研检索和模型训练提供数据。', quality: '保留来源；数值准确；问答完整', format: 'JSON、Markdown', scale: 100, source: '试验报告与采样记录', status: '建设中', project: '土壤科研', level: '内部', tags: ['土壤环境', '科研问答'], created },
       { id: 'paper', name: '科研文献解析样例', type: '文本', scene: '科研文献检索', demand: '提取标题、正文与表格', quality: '阅读顺序正确', format: 'Markdown', scale: 20, source: '论文', status: '草稿', project: '文献调研', level: '公开', tags: ['文献'], created },

@@ -1,9 +1,9 @@
 import { reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { initialData, qaSamples, researchText, imageCleaningSamples } from './data'
-import { uid, now, createVersion, canDownload, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords } from './domain'
+import { uid, now, createVersion, canDownload, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords, ensureProjects } from './domain'
 
-export const state = reactive(initialData())
+export const state = reactive(ensureProjects(initialData()))
 export const storage = reactive({ ready: false, error: '', saving: false })
 let db
 let pendingSaves = 0
@@ -31,6 +31,7 @@ export async function initialize() {
     })
     const saved = await transact('readonly', store => store.get('state'))
     if (saved) Object.assign(state, saved)
+    ensureProjects(state)
     for (const task of state.tasks) {
       if (task.status === '执行中') { task.status = '失败'; task.logs.push('页面刷新中断了模拟任务，请重试。') }
     }
@@ -67,7 +68,9 @@ export function addVersion(datasetId, records, type, sourceId, kind) {
 
 export function runTask(config) {
   if (!requireAction('edit', config.datasetId || state.activeDataset)) return
-  let task = { id: uid('task'), datasetId: state.activeDataset, ...config, created: now(), status: '执行中', progress: 10, logs: ['任务已创建（模拟）', '已读取输入和配置'] }
+  const input = state.sources.find(s => s.id === config.sourceId)
+  const name = config.name || `${input?.name || datasetName(state.activeDataset)} · ${config.type} · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
+  let task = { id: uid('task'), datasetId: state.activeDataset, ...config, name, created: now(), status: '执行中', progress: 10, logs: ['任务已创建（模拟）', '已读取输入和配置'] }
   state.tasks.unshift(task)
   task = state.tasks[0]
   const current = generation
@@ -181,5 +184,5 @@ export async function resetDemo() {
   generation++
   activeTimers.forEach(clearTimeout); activeTimers.clear()
   if (db) await transact('readwrite', store => store.clear())
-  Object.assign(state, initialData()); notify('已恢复初始演示数据')
+  Object.assign(state, ensureProjects(initialData())); notify('已恢复初始演示数据')
 }
