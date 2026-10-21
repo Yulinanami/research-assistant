@@ -1,15 +1,15 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Document, Edit, Grid, Brush, Picture, Files, ChatDotRound, MagicStick, View, ChatLineSquare } from '@element-plus/icons-vue'
-import { state, selectedSources, selectedVersions, requireAction, notify, importFile, runTask, addVersion, allowed, downloadSource, deleteSource } from '../store'
+import { Files, ChatDotRound, MagicStick, View, ChatLineSquare } from '@element-plus/icons-vue'
+import { state, selectedSources, selectedVersions, requireAction, notify, importFile, runTask, addVersion, allowed, downloadSource, deleteSource, projectDatasets, createDataset, taskName } from '../store'
 import { uid, now, isDatasetVersion } from '../domain'
-import { researchText, tableSamples } from '../data'
+import { tableSamples } from '../data'
+import { parserType, preparationInputs } from '../workflow'
 import FormDialog from './FormDialog.vue'
 import AnnotationPanel from './AnnotationPanel.vue'
 
 const featureIcons = {
-  'PDF解析': Document, 'Word解析': Edit, 'Excel解析': Grid, '文本清洗': Brush, '图片清洗': Picture,
   '知识片段': Files, '问答生成': ChatDotRound, '问答增强': MagicStick, '图片描述': View, '图片问答': ChatLineSquare,
 }
 
@@ -18,10 +18,10 @@ const emit = defineEmits(['navigate'])
 const search = ref(state.ui[props.page]?.search || '')
 const statusFilter = ref(state.ui[props.page]?.status || '全部状态')
 const pageNo = ref(state.ui[props.page]?.pageNo || 1)
-const tab = ref({ processing: 'PDF解析', generation: '知识片段', annotation: '问答标注', models: '模型配置' }[props.page] || '')
+const tab = ref({ generation: state.ui.pipeline?.datasetId === state.activeDataset ? state.ui.pipeline.generationType || '知识片段' : '知识片段', annotation: '问答标注', models: '模型配置' }[props.page] || '')
 const sourceRows = computed(() => selectedSources().filter(s => s.name.includes(search.value) && (statusFilter.value === '全部状态' || s.status === statusFilter.value)))
-const datasets = computed(() => state.datasets.filter(d => allowed('view', d.id) && d.name.includes(search.value)))
-const tasks = computed(() => state.tasks.filter(t => t.datasetId === state.activeDataset && t.name.includes(search.value) && (statusFilter.value === '全部状态' || t.status === statusFilter.value) && (props.page === 'processing' ? /解析|清洗/.test(t.type) : /问答|片段|图片描述/.test(t.type))))
+const datasets = computed(() => projectDatasets().filter(d => d.name.includes(search.value)))
+const tasks = computed(() => state.tasks.filter(t => t.datasetId === state.activeDataset && t.name.includes(search.value) && (statusFilter.value === '全部状态' || t.status === statusFilter.value) && (props.page === 'sources' ? /解析/.test(t.type) : /问答|片段|图片描述/.test(t.type))))
 const versions = computed(selectedVersions)
 const dialog = ref(false)
 const dialogTitle = ref('')
@@ -46,25 +46,35 @@ const evaluationFile = ref('')
 const compareModels = ref(state.models.map(m => m.id))
 const uploadBusy = ref(false)
 const previewTab = ref('内容')
-const steps = [{ title: '需求规划', page: 'planning' }, { title: '语料接入', page: 'sources' }, { title: '预处理', page: 'processing' }, { title: '生成与标注', page: 'generation' }, { title: '质量审核', page: 'review' }, { title: '成果发布', page: 'versions' }]
-const stepIndex = computed(() => steps.findIndex(s => s.page === props.page))
 watch([search, statusFilter, () => state.activeDataset], () => { pageNo.value = 1 })
 watch([search, statusFilter, pageNo], () => { state.ui[props.page] = { search: search.value, status: statusFilter.value, pageNo: pageNo.value } })
+watch(() => state.activeDataset, () => {
+  dialog.value = false; detail.value = null; chosen.value = []
+  if (props.page === 'generation') tab.value = state.ui.pipeline?.datasetId === state.activeDataset ? state.ui.pipeline.generationType || '知识片段' : '知识片段'
+})
 
 function openForm(title, schema, data, handler) { dialogTitle.value = title; fields.value = schema; initial.value = data || {}; saveHandler = handler; dialog.value = true }
 function saveForm(data) { if (saveHandler(data) !== false) dialog.value = false }
 const datasetFields = [
   { key: 'name', label: '数据集名称', required: true }, { key: 'type', label: '数据类型', type: 'select', options: ['文本', '图片', '问答对'], default: '问答对', required: true },
   { key: 'scene', label: '使用场景', required: true }, { key: 'demand', label: '业务需求', type: 'textarea', required: true }, { key: 'quality', label: '内容质量要求', type: 'textarea', default: '来源可追溯，内容准确完整' },
-  { key: 'format', label: '格式质量要求', default: 'JSON、Markdown' }, { key: 'scale', label: '规划数据量（条）', type: 'number', default: 100 },
-  { key: 'source', label: '数据来源' }, { key: 'project', label: '所属项目', required: true, default: '土壤科研' }, { key: 'level', label: '数据等级', type: 'select', options: ['公开', '内部'], default: '内部' },
+  { key: 'exportFormat', label: '导出文件格式', type:'select', options:['JSON','JSONL','Markdown'], default:'JSON' }, {key:'recordSchema',label:'记录结构要求',type:'select',options:['原始结构','Alpaca','ShareGPT'],default:'原始结构'}, { key: 'scale', label: '规划数据量（条）', type: 'number', default: 100 },
+  { key: 'source', label: '数据来源' }, {key:'tagsText',label:'数据集检索标签（逗号分隔）',help:'用于目录和广场检索，与逐条数据的标注标签分别保存。'}, { key: 'level', label: '数据等级', type: 'select', options: ['公开', '内部'], default: '内部' },
   { key: 'status', label: '保存方式', type: 'select', options: ['草稿', '建设中'], default: '草稿', help: '选择“建设中”将提交规划并进入语料接入。' },
 ]
 function editDataset(row) {
   if (!requireAction('edit', row?.id)) return
-  openForm(row ? '编辑数据集规划' : '新建数据集', datasetFields, row, data => {
+  const metadataFields = state.terms.filter(term => term.scope === 'dataset' && term.field !== 'dataset_code')
+  const schema = [...datasetFields, ...metadataFields.map(term => ({key:`meta_${term.field}`,label:term.name,help:term.description,required:term.required,type:term.type === '数值' ? 'number' : term.type === '枚举' ? 'select' : 'text',options:(term.enumValues || '').split(/[,，]/).map(value=>value.trim()).filter(Boolean)}))]
+  const initial = row ? {...row,tagsText:row.tags.join('，'),...Object.fromEntries(metadataFields.map(term=>[`meta_${term.field}`,row.metadata?.[term.field] ?? '']))} : {}
+  openForm(row ? '编辑数据集规划' : '新建数据集', schema, initial, data => {
+    data.metadata = Object.fromEntries(metadataFields.map(term=>[term.field,data[`meta_${term.field}`]]))
+    for (const term of metadataFields) delete data[`meta_${term.field}`]
+    data.tags = (data.tagsText || data.type).split(/[,，]/).map(tag=>tag.trim()).filter(Boolean); delete data.tagsText
+    data.format = `${data.exportFormat} · ${data.recordSchema}`
     if (row) Object.assign(row, data)
-    else { row = { id: uid('dataset'), ...data, tags: [data.type], created: now() }; state.datasets.unshift(row) }
+    else row = createDataset(data)
+    if (!row) return false
     state.activeDataset = row.id; notify('数据集规划已保存')
     if (data.status === '建设中') emit('navigate', 'sources')
   })
@@ -79,72 +89,71 @@ function editSource(row) {
 }
 async function upload(event) {
   uploadBusy.value = true
-  try { for (const file of event.target.files) await importFile(file); notify('文件已接入并保存到本地'); importDialog.value = false }
+  const datasetId = state.activeDataset
+  try { for (const file of event.target.files) await importFile(file, datasetId); notify('文件已接入并保存到本地'); importDialog.value = false }
   catch (e) { ElMessage.error(`导入失败：${e.message}`) }
   finally { uploadBusy.value = false; event.target.value = '' }
 }
 function importEntries() {
+  if (!requireAction('edit')) return
   try {
     const data = JSON.parse(manualText.value)
     const records = Array.isArray(data) ? data : data.records
     if (!Array.isArray(records) || !records.length) throw new Error('请提供非空JSON数组')
     addVersion(state.activeDataset, records.map(r => ({ ...r, question: r.instruction || r.question || '', answer: r.output || r.answer || '', reference: r.input || r.reference || '' })), '条目导入', '')
-    state.sources.unshift({ id: uid('src'), datasetId: state.activeDataset, name: '本地条目数据.json', type: 'JSON', status: '已接入', content: manualText.value, size: manualText.value.length, created: now() })
+    state.sources.unshift({ id: uid('src'), projectId:state.activeProjectId, datasetId: state.activeDataset, name: '本地条目数据.json', type: 'JSON', status: '已接入', content: manualText.value, size: manualText.value.length, created: now() })
     importDialog.value = false; notify(`已导入${records.length}条数据`)
   } catch (e) { ElMessage.warning(e.message) }
 }
 function importDatabase() {
+  if (!requireAction('edit')) return
   if (!dbConfig.value.fields.length) return ElMessage.warning('请至少选择一个字段')
   const rows = tableSamples.map(row => Object.fromEntries(dbConfig.value.fields.map(key => [key, row[key]])))
-  state.sources.unshift({ id: uid('src'), datasetId: state.activeDataset, name: `${dbConfig.value.table}.json`, type: 'JSON', status: '已接入', content: JSON.stringify(rows, null, 2), created: now(), size: 450 })
+  state.sources.unshift({ id: uid('src'), projectId:state.activeProjectId, datasetId: state.activeDataset, name: `${dbConfig.value.table}.json`, type: 'JSON', status: '已接入', content: JSON.stringify(rows, null, 2), created: now(), size: 450 })
   notify('已导入4条模拟数据库记录'); importDialog.value = false
 }
-function maskSelected() {
-  if (!requireAction('edit')) return
-  if (!chosen.value.length) return ElMessage.warning('请先勾选语料')
-  for (const source of chosen.value) source.content = source.content.replace(/1[3-9]\d{9}/g, '***********').replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]+/g, '[邮箱已脱敏]')
-  notify(`已对${chosen.value.length}份语料执行脱敏`)
+function handoffSources(rows) {
+  const prepared = preparationInputs(selectedSources(), selectedVersions(), state.activeDataset)
+  state.ui.pipeline = { datasetId: state.activeDataset, inputIds: rows.map(row => prepared.find(input => input.originId === row.id)?.id || row.id) }
+  emit('navigate', 'processing')
 }
-function configureTask() {
+function maskSources() {
   if (!requireAction('edit')) return
-  const type = tab.value
-  if (!selectedSources().length && type !== '图片清洗') return ElMessage.warning('请先导入语料')
-  const isVersion = ['问答增强', '自动标注'].includes(type)
-  const inputs = type === '图片清洗' ? [{ id: 'demo-images', name: '内置演示图片组（4张）' }, ...selectedSources().filter(s => s.content?.startsWith('data:image/'))] : isVersion ? versions.value.filter(isDatasetVersion) : [...selectedSources(), ...versions.value.filter(v => v.records.some(r => r.content))]
-  if (!inputs.length) return ElMessage.warning('请先生成问答成果')
+  const prepared=preparationInputs(selectedSources(),selectedVersions(),state.activeDataset).filter(input=>input.ready && input.kind==='text' && chosen.value.some(source=>source.id===input.originId))
+  if (!prepared.length) return ElMessage.warning('请勾选已解析或可直接读取的文本资料')
+  detail.value=runTask({name:taskName('资料脱敏'),type:'文本清洗',sourceId:prepared[0].id,sourceIds:prepared.map(input=>input.id),config:{pipeline:true,type:'文本清洗',inputs:prepared,rules:['隐私脱敏']}})
+}
+function configureTask(typeOverride, inputIds) {
+  if (!requireAction('edit')) return
+  const type = typeof typeOverride === 'string' ? typeOverride : tab.value
+  const isVersion = type === '问答增强'
+  const imageTask = ['图片描述', '图片问答'].includes(type)
+  const prepared = preparationInputs(selectedSources(), selectedVersions(), state.activeDataset)
+  const candidates = type.includes('解析') ? selectedSources().filter(source => parserType(source) === type)
+    : isVersion ? versions.value.filter(isDatasetVersion)
+    : [...prepared.filter(input => input.ready && input.kind === (imageTask ? 'image' : 'text')),
+      ...versions.value.filter(version => version.records.some(record => record.status !== '过滤' && (imageTask ? record.image?.startsWith('data:image/') : record.content)))]
+  const inputs = [...new Map(candidates.map(input => [input.id, input])).values()]
+  if (!inputs.length) return ElMessage.warning(type.includes('解析') ? '没有此类型的文档' : '请先接入或处理对应类型的资料')
+  const handoff = state.ui.pipeline
+  const preferred = inputIds || (handoff?.datasetId === state.activeDataset ? handoff.inputIds : [])
+  const selected = inputs.filter(input => preferred.includes(input.id)).map(input => input.id)
   const schema = [
-    { key: 'name', label: '任务名称', required: true, default: `${type}任务` },
-    { key: 'sourceId', label: type === '图片清洗' ? '输入图片（可多选）' : isVersion ? '输入成果版本' : '输入语料或上一步成果（可多选）', required: true, type: 'select', multiple: !isVersion, options: inputs.map(s => ({ label: s.records ? `${isDatasetVersion(s) ? `V${s.number} · ` : ''}${s.type} · ${s.created}` : s.name, value: s.id })), default: isVersion ? inputs[0]?.id : [inputs.find(s => s.number)?.id || inputs[0]?.id] },
+    { key: 'name', label: '任务名称', required: true, default: taskName(type) },
+    { key: 'sourceId', label: isVersion ? '输入成果版本' : '输入资料或上一步成果', required: true, type: 'select', multiple: !isVersion,
+      options: inputs.map(input => ({ label: input.records ? `${isDatasetVersion(input) ? `V${input.number} · ` : ''}${input.type} · ${input.created}` : input.name, value: input.id })),
+      default: isVersion ? selected[0] || inputs[0].id : selected.length ? selected : [inputs[0].id] },
   ]
-  if (type === '图片清洗') schema.push(
-    { key: 'rules', label: '清洗步骤', type: 'checks', options: ['重复图片去重', '质量筛选', '格式标准化'], default: ['重复图片去重', '质量筛选', '格式标准化'], help: '内置图片含重复、低分辨率和模糊样例。上传图片使用模拟尺寸900×500和清晰度90；不执行真实质量检测或文件转换。' },
-    { key: 'minWidth', label: '最低宽度（像素）', type: 'number', default: 300 },
-    { key: 'minHeight', label: '最低高度（像素）', type: 'number', default: 200 },
-    { key: 'minClarity', label: '最低清晰度（模拟评分，0—100）', type: 'number', default: 60, min: 0, max: 100 },
-    { key: 'imageFormat', label: '目标格式', type: 'select', options: ['PNG', 'JPEG', 'WEBP'], default: 'PNG' },
-    { key: 'maxWidth', label: '输出最大宽度（像素）', type: 'number', default: 600 },
-    { key: 'maxHeight', label: '输出最大高度（像素）', type: 'number', default: 600, help: '按比例缩小，不放大；模拟展示目标尺寸与格式，原始文件保持不变。' })
-  if (type === '文本清洗') schema.push(
-    { key: 'template', label: '场景清洗流程', type: 'select', options: ['自定义', ...state.standards.filter(s => s.category === '场景清洗流程').map(s => s.name)], default: '自定义' },
-    { key: 'rules', label: '清洗步骤', type: 'checks', options: ['文档去重', '质量过滤', '隐私脱敏', '格式标准化', '移除think标签'], default: ['文档去重', '格式标准化'] },
-    { key: 'custom', label: '自定义清洗规则', type: 'textarea', help: '用于展示规则配置，代码不会执行。' })
-  if (type.includes('解析')) schema.push({ key: 'format', label: '输出格式', type: 'select', options: ['Markdown', 'JSON'], default: 'Markdown' },
-    { key: 'options', label: '提取选项', type: 'checks', options: type === 'Excel解析' ? ['处理合并单元格', '识别表头', '推断数据类型'] : ['标题与正文', '表格', '公式', '图片', '还原阅读顺序', 'OCR'], default: ['表格', '图片'] })
-  if (type === 'Excel解析') schema.push({ key: 'sheets', label: '工作表', default: '全部工作表' })
-  if (type === 'PDF解析') schema.push({ key: 'pdfType', label: 'PDF类型', type: 'select', options: ['自动识别', '文本型', '扫描型', '图层型'], default: '自动识别' })
+  if (type.includes('解析')) schema[1].help = `使用设置中的解析配置：${state.settings.parsing.format}；${state.settings.parsing.options.join('、')}。可在右上角设置中调整。`
   if (type === '知识片段') schema.push({ key: 'chunkType', label: '切片方式', type: 'select', options: ['固定大小', '分隔符'], default: '固定大小' }, { key: 'size', label: '片段大小（字符）', type: 'number', default: 180, min: 50, max: 5000 }, { key: 'separator', label: '分隔符', default: '\\n\\n' })
-  if (/问答|图片描述|自动标注/.test(type)) schema.push({ key: 'model', label: '使用模型', required: true, type: 'select', options: state.models.filter(m => m.status === '已上架').map(m => ({ label: m.name, value: m.id })), default: state.models.find(m => m.status === '已上架')?.id }, { key: 'prompt', label: '任务提示词', type: 'textarea', default: '根据参考材料生成准确的结果，保留来源，不编造事实。' })
+  if (/问答|图片描述/.test(type)) schema.push({ key: 'model', label: '使用模型', required: true, type: 'select', options: state.models.filter(model => model.status === '已上架').map(model => ({ label: model.name, value: model.id })), default: state.models.find(model => model.status === '已上架')?.id }, { key: 'prompt', label: '任务提示词', type: 'textarea', default: '根据参考材料生成准确的结果，保留来源，不编造事实。' })
   if (type === '问答增强') schema.push({ key: 'audience', label: '目标受众', type: 'select', options: ['科研人员', '初学者', '专业技术人员'], default: '科研人员' }, { key: 'style', label: '表达方式', type: 'select', options: ['简明说明', '教学讲解', '专业论述'], default: '简明说明' })
   schema.push({ key: 'fail', label: '演示失败状态', type: 'switch', default: false })
   openForm(`新建${type}任务`, schema, null, data => {
-    if (data.template && data.template !== '自定义') data.rules = state.standards.find(s => s.name === data.template)?.rules || data.rules
+    const ids = Array.isArray(data.sourceId) ? data.sourceId : [data.sourceId]
+    if (!ids.length) { ElMessage.warning('请选择输入资料'); return false }
     let task
-    if (type === '图片清洗') {
-      if (!data.sourceId?.length) return ElMessage.warning('请选择输入图片')
-      task = runTask({ name: data.name, type, sourceId: data.sourceId.find(id => id !== 'demo-images') || 'demo-images', fail: data.fail, config: data })
-    } else {
-      for (const sourceId of Array.isArray(data.sourceId) ? data.sourceId : [data.sourceId]) task = runTask({ name: data.name, type, sourceId, fail: data.fail, config: data })
-    }
+    for (const sourceId of ids) task = runTask({ name: data.name, type, sourceId, fail: data.fail, config: type.includes('解析') ? {...state.settings.parsing,...data} : data })
     if (task) { detail.value = task; notify('任务已创建，正在模拟处理') }
   })
 }
@@ -161,7 +170,6 @@ function evaluate() { if (!compareModels.value.length || !evaluationFile.value) 
 </script>
 
 <template>
-  <section v-if="['planning', 'sources', 'processing', 'generation'].includes(page)" class="panel step-panel"><button v-for="(step, index) in steps" :key="step.page" :class="['step-button', { active: step.page === page, passed: index < stepIndex }]" @click="$emit('navigate', step.page)"><span>{{ index + 1 }}</span>{{ step.title }}<el-icon v-if="index < steps.length - 1"><ArrowRight /></el-icon></button></section>
 
   <section v-if="page === 'planning'" class="panel">
     <div class="section-title"><div><h3>数据集建设计划 <span class="count">{{ datasets.length }}</span></h3><p>定义数据需求与质量要求，按步骤推进建设</p></div><el-button type="primary" :disabled="!allowed('edit')" @click="editDataset()"><el-icon><Plus /></el-icon>新建数据集</el-button></div>
@@ -171,16 +179,16 @@ function evaluate() { if (!compareModels.value.length || !evaluationFile.value) 
   </section>
 
   <section v-if="page === 'sources'" class="panel">
-    <div class="section-title"><div><h3>语料库 <span class="count">{{ selectedSources().length }}</span></h3><p>文件与条目数据统一管理，保留原始资料</p></div><el-button type="primary" :disabled="!allowed('edit')" @click="importDialog = true"><el-icon><Upload /></el-icon>接入数据</el-button></div>
-    <div class="toolbar"><el-input v-model="search" placeholder="搜索文件名称" clearable><template #prefix><el-icon><Search /></el-icon></template></el-input><el-select v-model="statusFilter"><el-option v-for="s in ['全部状态', '待处理', '待解析', '已解析', '已处理', '待标注', '已接入']" :key="s" :value="s" /></el-select><el-button :disabled="!chosen.length || !allowed('edit')" @click="maskSelected">批量脱敏</el-button><span class="toolbar-spacer"></span><span class="muted">已选 {{ chosen.length }} 项</span></div>
-    <el-table :data="sourceRows.slice((pageNo - 1) * 8, pageNo * 8)" @selection-change="chosen = $event" row-key="id"><el-table-column type="selection" width="45" /><el-table-column label="文件名称" min-width="250"><template #default="{ row }"><div class="name-cell"><span class="file-icon"><el-icon><Document /></el-icon></span><div><b>{{ row.name }}</b><small>{{ row.created }}</small></div></div></template></el-table-column><el-table-column label="格式" width="80"><template #default="{ row }"><span class="format-tag">{{ row.type }}</span></template></el-table-column><el-table-column label="大小" width="100"><template #default="{ row }">{{ ((row.size || 0) / 1024).toFixed(1) }} KB</template></el-table-column><el-table-column label="状态" width="110"><template #default="{ row }"><el-tag :type="row.status.startsWith('待') ? 'warning' : 'success'">{{ row.status }}</el-tag></template></el-table-column><el-table-column label="操作" width="230"><template #default="{ row }"><el-button link type="primary" @click="detail = row; previewTab = '内容'">预览</el-button><el-button link type="primary" :disabled="!allowed('edit')" @click="editSource(row)">编辑</el-button><el-button link type="primary" :disabled="!allowed('edit')" @click="$emit('navigate', 'processing')">加工</el-button><el-button link type="danger" :disabled="!allowed('edit')" @click="removeSource(row)">删除</el-button></template></el-table-column></el-table><el-pagination v-model:current-page="pageNo" :page-size="8" :total="sourceRows.length" layout="total, prev, pager, next" />
+    <div class="section-title"><div><h3>语料库 <span class="count">{{ selectedSources().length }}</span></h3><p>统一接入资料，在此完成文档解析并预览内容</p></div><el-button type="primary" :disabled="!allowed('edit')" @click="importDialog = true"><el-icon><Upload /></el-icon>接入数据</el-button></div>
+    <div class="toolbar"><el-input v-model="search" placeholder="搜索文件名称" clearable><template #prefix><el-icon><Search /></el-icon></template></el-input><el-select v-model="statusFilter"><el-option v-for="s in ['全部状态', '待处理', '待解析', '解析中', '解析失败', '已解析', '已处理', '待标注', '已接入']" :key="s" :value="s" /></el-select><el-button :disabled="!chosen.length || !allowed('edit')" @click="handoffSources(chosen)">进入预处理</el-button><el-button :disabled="!chosen.length || !allowed('edit')" @click="maskSources">选中资料脱敏</el-button><span class="toolbar-spacer"></span><span class="muted">已选 {{ chosen.length }} 项</span></div>
+    <el-table :data="sourceRows.slice((pageNo - 1) * 8, pageNo * 8)" @selection-change="chosen = $event" row-key="id"><el-table-column type="selection" width="45" /><el-table-column label="文件名称" min-width="250"><template #default="{ row }"><div class="name-cell"><span class="file-icon"><el-icon><Document /></el-icon></span><div><b>{{ row.name }}</b><small>{{ row.created }}</small></div></div></template></el-table-column><el-table-column label="格式" width="80"><template #default="{ row }"><span class="format-tag">{{ row.type }}</span></template></el-table-column><el-table-column label="大小" width="100"><template #default="{ row }">{{ ((row.size || 0) / 1024).toFixed(1) }} KB</template></el-table-column><el-table-column label="状态" width="110"><template #default="{ row }"><el-tag :type="row.status.startsWith('待') ? 'warning' : 'success'">{{ row.status }}</el-tag></template></el-table-column><el-table-column label="操作" width="310"><template #default="{ row }"><el-button link type="primary" @click="detail = row; previewTab = '内容'">预览</el-button><el-button link type="primary" :disabled="!allowed('edit')" @click="editSource(row)">编辑</el-button><el-button v-if="parserType(row)" link type="primary" :disabled="!allowed('edit') || row.status === '解析中'" @click="configureTask(parserType(row), [row.id])">解析</el-button><el-button link type="primary" :disabled="!allowed('edit')" @click="handoffSources([row])">预处理</el-button><el-button link type="danger" :disabled="!allowed('edit')" @click="removeSource(row)">删除</el-button></template></el-table-column></el-table><el-pagination v-model:current-page="pageNo" :page-size="8" :total="sourceRows.length" layout="total, prev, pager, next" />
   </section>
 
-  <template v-if="page === 'processing' || page === 'generation'">
-    <section class="panel"><el-tabs v-model="tab"><el-tab-pane v-for="name in page === 'processing' ? ['PDF解析', 'Word解析', 'Excel解析', '文本清洗', '图片清洗'] : ['知识片段', '问答生成', '问答增强', '图片描述', '图片问答']" :key="name" :name="name" :label="name" /></el-tabs>
+  <template v-if="page === 'sources' || page === 'generation'">
+    <section v-if="page === 'generation'" class="panel"><el-tabs v-model="tab"><el-tab-pane v-for="name in ['知识片段', '问答生成', '问答增强', '图片描述', '图片问答']" :key="name" :name="name" :label="name" /></el-tabs>
       <div class="feature-intro"><span class="feature-icon"><el-icon><component :is="featureIcons[tab]" /></el-icon></span><div><h3>{{ tab }}</h3><p>{{ tab === '知识片段' ? '按片段大小或分隔符组织文档内容，保留文档名称和来源。' : tab === '图片清洗' ? '筛选重复、低分辨率和模糊图片，配置统一格式与尺寸，查看保留结果和过滤原因。' : tab === '文本清洗' ? '配置去重、脱敏、标准化等规则，查看处理前后的变化。' : tab.includes('解析') ? '提取标题、正文、表格、图片等内容，统一输出Markdown或JSON。' : '选择资料与模型，设置提示词，生成并修改数据成果。' }}</p><span class="inline-hint">模拟处理 · 结果可在成果与版本管理中查看</span></div><el-button type="primary" :disabled="!allowed('edit')" @click="configureTask"><el-icon><Plus /></el-icon>新建{{ tab }}任务</el-button></div>
     </section>
-    <section class="panel"><div class="section-title"><h3>任务记录 <span class="count">{{ tasks.length }}</span></h3><el-button link type="primary" @click="$emit('navigate', 'versions')">查看加工成果<el-icon><ArrowRight /></el-icon></el-button></div><div class="toolbar"><el-input v-model="search" placeholder="搜索任务名称" clearable /><el-select v-model="statusFilter"><el-option v-for="s in ['全部状态', '执行中', '已完成', '失败']" :key="s" :value="s" /></el-select></div><el-table :data="tasks.slice((pageNo - 1) * 8, pageNo * 8)" empty-text="尚无任务，点击上方按钮创建"><el-table-column label="任务名称" prop="name" min-width="210" /><el-table-column label="类型" prop="type" width="115" /><el-table-column label="状态" width="110"><template #default="{ row }"><el-tag :type="row.status === '已完成' ? 'success' : row.status === '失败' ? 'danger' : 'primary'">{{ row.status }}</el-tag></template></el-table-column><el-table-column label="处理进度" width="180"><template #default="{ row }"><el-progress :percentage="row.progress" :status="row.status === '失败' ? 'exception' : undefined" /></template></el-table-column><el-table-column label="创建时间" prop="created" min-width="170" /><el-table-column label="操作" width="180"><template #default="{ row }"><el-button link type="primary" @click="detail = row">详情</el-button><el-button v-if="row.versionId" link type="primary" @click="state.focusVersion = row.versionId; $emit('navigate', 'versions')">成果</el-button><el-button v-if="row.status === '失败'" link type="primary" @click="detail = runTask({ ...JSON.parse(JSON.stringify(row)), id: uid('task'), fail: false })">重试</el-button></template></el-table-column></el-table><el-pagination v-model:current-page="pageNo" :page-size="8" :total="tasks.length" layout="total, prev, pager, next" /></section>
+    <section class="panel"><div class="section-title"><h3>任务记录 <span class="count">{{ tasks.length }}</span></h3><el-button link type="primary" @click="$emit('navigate', 'versions')">查看加工成果<el-icon><ArrowRight /></el-icon></el-button></div><div class="toolbar"><el-input v-model="search" placeholder="搜索任务名称" clearable /><el-select v-model="statusFilter"><el-option v-for="s in ['全部状态', '执行中', '已完成', '失败']" :key="s" :value="s" /></el-select></div><el-table :data="tasks.slice((pageNo - 1) * 8, pageNo * 8)" :empty-text="page === 'sources' ? '暂无解析任务，可在语料列表中选择文档解析' : '尚无任务，点击上方按钮创建'"><el-table-column label="任务名称" prop="name" min-width="210" /><el-table-column label="类型" prop="type" width="115" /><el-table-column label="状态" width="110"><template #default="{ row }"><el-tag :type="row.status === '已完成' ? 'success' : row.status === '失败' ? 'danger' : 'primary'">{{ row.status }}</el-tag></template></el-table-column><el-table-column label="处理进度" width="180"><template #default="{ row }"><el-progress :percentage="row.progress" :status="row.status === '失败' ? 'exception' : undefined" /></template></el-table-column><el-table-column label="创建时间" prop="created" min-width="170" /><el-table-column label="操作" width="180"><template #default="{ row }"><el-button link type="primary" @click="detail = row">详情</el-button><el-button v-if="row.versionId" link type="primary" @click="state.focusVersion = row.versionId; $emit('navigate', 'versions')">成果</el-button><el-button v-if="row.status === '失败'" link type="primary" @click="detail = runTask({ ...JSON.parse(JSON.stringify(row)), id: uid('task'), fail: false })">重试</el-button></template></el-table-column></el-table><el-pagination v-model:current-page="pageNo" :page-size="8" :total="tasks.length" layout="total, prev, pager, next" /></section>
   </template>
 
   <AnnotationPanel v-if="page === 'annotation'" @navigate="$emit('navigate', $event)" />

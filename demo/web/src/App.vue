@@ -25,19 +25,17 @@ const internalPages = [
   { id:'generation', title:'数据标注', subtitle:'按任务模板生成、分类或人工标注数据' },
   { id:'review', title:'质量审核', subtitle:'在项目内检查、修订并审核数据集成果' },
   { id:'versions', title:'项目成果', subtitle:'查看中间成果与数据集版本，继续加工或发布成果' },
-  { id:'project-tasks', title:'项目任务', subtitle:'跟踪当前项目的加工任务与预设流程' },
   { id:'settings', title:'设置', subtitle:'统一维护解析、模型、清洗与标注模板' },
 ]
 const pages = [...navigation.flatMap(group => group.items), ...internalPages]
 const resolve = id => resolveSessionPage(id, Boolean(auth.session), pages.map(item => item.id))
 const page = ref(resolve(location.hash.slice(1) || 'home'))
 const collapsed = ref(false)
-const projectPages = ['planning','sources','processing','cleaning','generation','review','versions','project-tasks']
+const projectPages = ['planning','sources','processing','cleaning','generation','review','versions']
 const inProject = computed(() => projectPages.includes(page.value))
 const project = computed(() => visibleProjects().find(item => item.id === state.activeProjectId))
 const datasets = computed(projectDatasets)
 const current = computed(() => pages.find(item => item.id === page.value) || pages[0])
-const projectLinks = [{id:'planning',title:'项目概览',icon:'FolderOpened'},{id:'project-tasks',title:'加工任务',icon:'SetUp'},{id:'versions',title:'项目成果',icon:'Files'}]
 function navigate(id) { page.value = resolve(id); location.hash = page.value; window.scrollTo({top:0,behavior:'instant'}) }
 function enterSelectedProject(id) { if (openProject(id)) navigate('planning') }
 function ensureContext() {
@@ -71,7 +69,6 @@ onMounted(async () => { await initialize(); ensureContext(); syncRoute(); window
       <a class="brand" href="#workbench" @click.prevent="navigate('workbench')"><span class="brand-mark"><el-icon><DataLine /></el-icon></span><span v-if="!collapsed"><b>研数</b><small>科研数据建设与共享</small></span></a>
       <div class="space-label" v-if="!collapsed">RESEARCH WORKSPACE</div>
       <nav><section v-for="group in navigation" :key="group.title" class="nav-group"><div v-if="!collapsed" class="nav-group-title">{{ group.title }}</div><button v-for="item in group.items" :key="item.id" :class="['nav-item',{active:page === item.id || (item.id === 'projects' && inProject)}]" :title="item.title" @click="navigate(item.id)"><el-icon><component :is="item.icon" /></el-icon><span v-if="!collapsed">{{ item.title }}</span></button></section></nav>
-      <div v-if="inProject && project && !collapsed" class="sidebar-project"><small>当前加工项目</small><b>{{ project.name }}</b><button v-for="item in projectLinks" :key="item.id" :class="['nav-item',{active:page === item.id}]" @click="navigate(item.id)"><el-icon><component :is="item.icon" /></el-icon>{{ item.title }}</button></div>
       <div class="sidebar-footer"><span class="online-dot"></span><span v-if="!collapsed">本地演示空间</span><el-button text @click="collapsed = !collapsed"><el-icon><component :is="collapsed ? 'Expand' : 'Fold'" /></el-icon></el-button></div>
     </aside>
     <div class="main-shell">
@@ -88,11 +85,11 @@ onMounted(async () => { await initialize(); ensureContext(); syncRoute(); window
           <PreparationView v-else-if="page === 'processing'" @navigate="navigate" />
           <CleaningView v-else-if="page === 'cleaning'" @navigate="navigate" />
           <AnnotationWorkbench v-else-if="page === 'generation'" :key="state.activeDataset" @navigate="navigate" />
-          <ProjectTasks v-else-if="page === 'project-tasks'" @navigate="navigate" />
           <ResultsView v-else-if="['review','versions'].includes(page)" :key="page + state.activeDataset" :page="page" @navigate="navigate" />
           <ProcessView v-else :key="page + state.activeDataset" :page="page" @navigate="navigate" />
         </template>
         <ProjectsView v-else-if="page === 'projects' || inProject" @navigate="navigate" />
+        <ProjectTasks v-else-if="page === 'project-tasks'" @navigate="navigate" />
         <LandingView v-else-if="page === 'workbench'" :page="page" @navigate="navigate" />
         <DatasetLibrary v-else-if="['mydatasets','catalog','square','audit','requests'].includes(page)" :mode="page" @navigate="navigate" />
         <SettingsView v-else-if="page === 'settings'" @navigate="navigate" />

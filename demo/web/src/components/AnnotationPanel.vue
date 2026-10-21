@@ -1,11 +1,12 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { state, selectedVersions, selectedSources, addVersion, requireAction, notify, runTask, allowed } from '../store'
+import { state, selectedVersions, selectedSources, addVersion, requireAction, notify, runTask, allowed, taskName } from '../store'
 import { sampleImage, qaSamples } from '../data'
 import { uid, now, isDatasetVersion } from '../domain'
 const emit = defineEmits(['navigate'])
-const tab = ref('问答标注')
+const props = defineProps({initialTab:{type:String,default:'问答标注'}})
+const tab = ref(props.initialTab)
 const versionId = ref('')
 const index = ref(0)
 const records = ref([])
@@ -32,6 +33,7 @@ function save(submit = false) {
   if (tab.value === '问答标注' && !records.value.length) return ElMessage.warning('请选择问答成果')
   if (submit && tab.value === '问答标注' && records.value.some(r => !r.label)) return ElMessage.warning('请完成每条数据的可用性标注，再提交审核')
   if (tab.value === '图像标注' && !boxes.value.length) return ElMessage.warning('请先框选图片区域')
+  if (tab.value === '图像标注' && !images.value.some(item=>item.id===imageId.value)) return ElMessage.warning('请先接入真实的图片资料')
   const output = tab.value === '问答标注' ? records.value : [{ image: imageId.value || '演示图片', boxes: boxes.value }]
   const input = state.versions.find(v => v.id === versionId.value)
   const base = input?.type === '自动标注' ? state.versions.find(v => v.id === input.sourceId) : input
@@ -39,13 +41,13 @@ function save(submit = false) {
   if (!version || version.status !== '草稿') version = addVersion(state.activeDataset, output, tab.value, tab.value === '问答标注' ? base?.id || versionId.value : imageId.value)
   else version.records = JSON.parse(JSON.stringify(output))
   draftId.value = version.id
-  if (!task.value) { task.value = { id: uid('task'), datasetId: state.activeDataset, name: tab.value + '任务', type: tab.value, status: '标注中', progress: 0, created: now(), versionId: version.id, logs: ['人工标注'] }; state.tasks.unshift(task.value); task.value = state.tasks[0] }
+  if (!task.value) { task.value = { id: uid('task'), projectId:state.activeProjectId, datasetId: state.activeDataset, name: taskName(tab.value), type: tab.value, status: '标注中', progress: 0, created: now(), versionId: version.id, logs: ['人工标注'] }; state.tasks.unshift(task.value); task.value = state.tasks[0] }
   task.value.progress = tab.value === '图像标注' ? 100 : Math.round(records.value.filter(r => r.label).length / records.value.length * 100)
   if (submit) { version.status = '待审核'; state.focusVersion = version.id; task.value.status = '已提交'; notify('标注已提交审核'); emit('navigate', 'review') } else notify('标注草稿已保存')
 }
 function automatic() {
   if (!versionId.value || !model.value) return ElMessage.warning('请选择成果版本与模型')
-  runTask({ name: '问答自动标注', type: '自动标注', sourceId: versionId.value, config: { model: model.value, prompt: prompt.value } }); notify('自动标注任务已创建，请在成果列表查看建议并人工复核')
+  runTask({ name: taskName('问答自动标注'), type: '自动标注', sourceId: versionId.value, config: { model: model.value, prompt: prompt.value } }); notify('自动标注任务已创建，请在项目成果查看建议并人工复核')
 }
 function pointerDown(event) {
   if (!allowed('edit')) return
