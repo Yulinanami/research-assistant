@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Edit, Grid, Brush, Picture, Files, ChatDotRound, MagicStick, View, ChatLineSquare } from '@element-plus/icons-vue'
 import { state, selectedSources, selectedVersions, requireAction, notify, importFile, runTask, addVersion, allowed, downloadSource, deleteSource } from '../store'
 import { uid, now, isDatasetVersion } from '../domain'
-import { researchText, tableSamples } from '../data'
+import { researchText, tableSamples, qaSamples } from '../data'
 import FormDialog from './FormDialog.vue'
 import AnnotationPanel from './AnnotationPanel.vue'
 
@@ -43,7 +43,11 @@ const modelChoice = ref(state.models[0]?.id || '')
 const evaluation = ref(false)
 const evaluationResults = computed(() => state.evaluations)
 const evaluationFile = ref('')
-const compareModels = ref(state.models.map(m => m.id))
+const evaluationInput = ref(null)
+const evaluationRecords = ref([])
+const availableEvaluationModels = computed(() => state.models.filter(model => model.status === '已上架'))
+const canEvaluate = computed(() => evaluationRecords.value.length && compareModels.value.some(id => availableEvaluationModels.value.some(model => model.id === id)))
+const compareModels = ref(state.models.filter(m => m.status === '已上架').map(m => m.id))
 const uploadBusy = ref(false)
 const previewTab = ref('内容')
 const annotationMode = ref(props.page === 'annotation' ? '人工与辅助标注' : '生成数据')
@@ -127,17 +131,17 @@ function configureTask() {
     { key: 'sourceId', label: type === '图片清洗' ? '输入图片（可多选）' : isVersion ? '输入成果版本' : '输入语料或上一步成果（可多选）', required: true, type: 'select', multiple: !isVersion, options: inputs.map(s => ({ label: s.records ? `${isDatasetVersion(s) ? `V${s.number} · ` : ''}${s.type} · ${s.created}` : s.name, value: s.id })), default: isVersion ? inputs[0]?.id : [inputs.find(s => s.id === state.focusVersion)?.id || inputs.find(s => s.number)?.id || inputs[0]?.id] },
   ]
   if (type === '图片清洗') schema.push(
-    { key: 'rules', label: '清洗步骤', type: 'checks', options: ['重复图片去重', '质量筛选', '格式标准化'], default: ['重复图片去重', '质量筛选', '格式标准化'], help: '内置图片含重复、低分辨率和模糊样例。上传图片使用模拟尺寸900×500和清晰度90；不执行真实质量检测或文件转换。' },
+    { key: 'rules', label: '清洗步骤', type: 'checks', options: ['重复图片去重', '质量筛选', '格式标准化'], default: ['重复图片去重', '质量筛选', '格式标准化'] },
     { key: 'minWidth', label: '最低宽度（像素）', type: 'number', default: 300 },
     { key: 'minHeight', label: '最低高度（像素）', type: 'number', default: 200 },
     { key: 'minClarity', label: '最低清晰度（模拟评分，0—100）', type: 'number', default: 60, min: 0, max: 100 },
     { key: 'imageFormat', label: '目标格式', type: 'select', options: ['PNG', 'JPEG', 'WEBP'], default: 'PNG' },
     { key: 'maxWidth', label: '输出最大宽度（像素）', type: 'number', default: 600 },
-    { key: 'maxHeight', label: '输出最大高度（像素）', type: 'number', default: 600, help: '按比例缩小，不放大；模拟展示目标尺寸与格式，原始文件保持不变。' })
+    { key: 'maxHeight', label: '输出最大高度（像素）', type: 'number', default: 600, help: '按比例缩小，不放大。' })
   if (type === '文本清洗') schema.push(
     { key: 'template', label: '场景清洗流程', type: 'select', options: ['自定义', ...state.standards.filter(s => s.category === '场景清洗流程').map(s => s.name)], default: '自定义' },
     { key: 'rules', label: '清洗步骤', type: 'checks', options: ['文档去重', '质量过滤', '隐私脱敏', '格式标准化', '移除think标签'], default: ['文档去重', '格式标准化'] },
-    { key: 'custom', label: '自定义清洗规则', type: 'textarea', help: '用于展示规则配置，代码不会执行。' })
+    { key: 'custom', label: '自定义清洗规则', type: 'textarea' })
   if (type.includes('解析')) schema.push({ key: 'format', label: '输出格式', type: 'select', options: ['Markdown', 'JSON'], default: 'Markdown' },
     { key: 'options', label: '提取选项', type: 'checks', options: type === 'Excel解析' ? ['处理合并单元格', '识别表头', '推断数据类型'] : ['标题与正文', '表格', '公式', '图片', '还原阅读顺序', 'OCR'], default: ['表格', '图片'] })
   if (type === 'Excel解析') schema.push({ key: 'sheets', label: '工作表', default: '全部工作表' })
@@ -184,7 +188,51 @@ function sendChat() {
   chatMessages.value.push({ role: '您', text: chatText.value }, { role: '科研助手 · 模拟回答', text: '根据演示材料，A组含水率为20%，B组为25%，两组相差5个百分点。尚无作物产量记录，不能推断增产效果。' }); chatText.value = ''
 }
 async function copy(text) { try { await navigator.clipboard.writeText(text); ElMessage.success('已复制') } catch { ElMessage.warning('浏览器未允许复制，请手动选中文本复制') } }
-function evaluate() { if (!compareModels.value.length || !evaluationFile.value) return ElMessage.warning('请先上传评测内容并选择模型'); evaluation.value = true; state.evaluations = compareModels.value.map((id, i) => ({ name: state.models.find(m => m.id === id)?.name, accuracy: 88 - i * 5, completeness: 92 - i * 4, time: `${1.2 + i * 0.3}s`, samples: 3 })); evaluation.value = false }
+function clearEvaluationFile() { evaluationFile.value = ''; evaluationRecords.value = []; if (evaluationInput.value) evaluationInput.value.value = '' }
+function useEvaluationSample() { evaluationFile.value = '土壤科研问答样例.json'; evaluationRecords.value = qaSamples.map((row, index) => ({ question: row.question, answer: index === 2 ? '本试验没有记录作物产量，无法判断增产效果。' : row.answer })) }
+function parseEvaluationCsv(text) {
+  const rows = []; let row = [], value = '', quoted = false
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]
+    if (char === '"') { if (quoted && text[i + 1] === '"') { value += '"'; i++ } else quoted = !quoted }
+    else if (!quoted && (char === ',' || char === '\n')) { row.push(value); value = ''; if (char === '\n') { rows.push(row); row = [] } }
+    else if (char !== '\r') value += char
+  }
+  if (quoted) throw new Error('CSV引号未闭合')
+  row.push(value); if (row.some(cell => cell.trim())) rows.push(row)
+  const headers = (rows.shift() || []).map(cell => cell.trim())
+  return rows.filter(row => row.some(cell => cell.trim())).map(row => Object.fromEntries(headers.map((key, i) => [key, row[i] || ''])))
+}
+async function uploadEvaluation(event) {
+  const file = event.target.files[0]
+  if (!file) return
+  try {
+    const text = (await file.text()).replace(/^\uFEFF/, '').trim()
+    if (!text) throw new Error('文件内容为空')
+    const type = file.name.split('.').pop().toLowerCase()
+    let rows
+    if (type === 'json') { const parsed = JSON.parse(text); rows = Array.isArray(parsed) ? parsed : parsed.records }
+    else if (type === 'jsonl') rows = text.split(/\r?\n/).filter(line => line.trim()).map(line => JSON.parse(line))
+    else if (type === 'csv') rows = parseEvaluationCsv(text)
+    else if (type === 'txt') rows = text.split(/\r?\n/).filter(line => line.trim()).map(question => ({ question }))
+    else throw new Error('请选择JSON、JSONL、CSV或TXT文件')
+    if (!Array.isArray(rows) || !rows.length) throw new Error('文件中没有评测条目')
+    const records = rows.map(row => ({ question: row?.question || row?.instruction || row?.prompt || '', answer: row?.answer || row?.output || row?.expected_answer || '' }))
+    if (records.some(row => typeof row.question !== 'string' || !row.question.trim() || typeof row.answer !== 'string')) throw new Error('每条数据需要文本类型的question或instruction字段；TXT文件每行一个问题')
+    evaluationFile.value = file.name; evaluationRecords.value = records
+  } catch (error) { ElMessage.warning(error instanceof SyntaxError ? 'JSON内容格式不正确，请检查文件' : `无法读取评测文件：${error.message}`) }
+  finally { event.target.value = '' }
+}
+async function evaluate() {
+  if (!canEvaluate.value || evaluation.value) return
+  evaluation.value = true
+  const models = availableEvaluationModels.value.filter(model => compareModels.value.includes(model.id))
+  const file = evaluationFile.value, samples = evaluationRecords.value.length
+  try {
+    await new Promise(resolve => setTimeout(resolve, 600))
+    state.evaluations = models.map((model, i) => ({ name: model.name, accuracy: 88 - i * 5, completeness: 92 - i * 4, time: `${(1.2 + i * 0.3).toFixed(1)}s`, samples, file }))
+  } finally { evaluation.value = false }
+}
 </script>
 
 <template>
@@ -206,7 +254,7 @@ function evaluate() { if (!compareModels.value.length || !evaluationFile.value) 
 
   <template v-if="page === 'processing' || (['generation','annotation'].includes(page) && annotationMode === '生成数据')">
     <section class="panel"><el-tabs v-model="tab"><el-tab-pane v-for="name in page === 'processing' ? processingTabs : ['知识片段', '问答生成', '问答增强', '图片描述', '图片问答']" :key="name" :name="name"><template #label><span class="icon-tab"><el-icon><component :is="featureIcons[name]" /></el-icon>{{ name }}</span></template></el-tab-pane></el-tabs>
-      <div class="feature-intro"><span class="feature-icon"><el-icon><component :is="featureIcons[tab]" /></el-icon></span><div><h3>{{ tab }}</h3><p>{{ tab === '知识片段' ? '按片段大小或分隔符组织文档内容，保留文档名称和来源。' : tab === '图片清洗' ? '筛选重复、低分辨率和模糊图片，配置统一格式与尺寸，查看保留结果和过滤原因。' : tab === '文本清洗' ? '配置去重、脱敏、标准化等规则，查看处理前后的变化。' : tab.includes('解析') ? '提取标题、正文、表格、图片等内容，统一输出Markdown或JSON。' : '选择资料与模型，设置提示词，生成并修改数据成果。' }}</p><span class="inline-hint">模拟处理 · 中间成果保存在当前项目</span></div><el-button type="primary" :disabled="!allowed('edit')" @click="configureTask"><el-icon><Plus /></el-icon>新建{{ tab }}任务</el-button></div>
+      <div class="feature-intro"><span class="feature-icon"><el-icon><component :is="featureIcons[tab]" /></el-icon></span><div><h3>{{ tab }}</h3><p>{{ tab === '知识片段' ? '按片段大小或分隔符组织文档内容，保留文档名称和来源。' : tab === '图片清洗' ? '筛选重复、低分辨率和模糊图片，配置统一格式与尺寸，查看保留结果和过滤原因。' : tab === '文本清洗' ? '配置去重、脱敏、标准化等规则，查看处理前后的变化。' : tab.includes('解析') ? '提取标题、正文、表格、图片等内容，统一输出Markdown或JSON。' : '选择资料与模型，设置提示词，生成并修改数据成果。' }}</p></div><el-button type="primary" :disabled="!allowed('edit')" @click="configureTask"><el-icon><Plus /></el-icon>新建{{ tab }}任务</el-button></div>
     </section>
     <section class="panel"><div class="section-title"><h3>任务记录 <span class="count">{{ tasks.length }}</span></h3><el-button link type="primary" @click="$emit('navigate', 'versions')">查看加工成果<el-icon><ArrowRight /></el-icon></el-button></div><div class="toolbar"><el-input v-model="search" placeholder="搜索任务名称" clearable /><el-select v-model="statusFilter"><el-option v-for="s in ['全部状态', '执行中', '已完成', '失败']" :key="s" :value="s" /></el-select></div><el-table :data="tasks.slice((pageNo - 1) * 8, pageNo * 8)" empty-text="尚无任务，点击上方按钮创建"><el-table-column label="任务名称" prop="name" min-width="210" /><el-table-column label="类型" prop="type" width="115" /><el-table-column label="状态" width="110"><template #default="{ row }"><el-tag :type="row.status === '已完成' ? 'success' : row.status === '失败' ? 'danger' : 'primary'">{{ row.status }}</el-tag></template></el-table-column><el-table-column label="处理进度" width="180"><template #default="{ row }"><el-progress :percentage="row.progress" :status="row.status === '失败' ? 'exception' : undefined" /></template></el-table-column><el-table-column label="创建时间" prop="created" min-width="170" /><el-table-column label="操作" width="180"><template #default="{ row }"><el-button link type="primary" @click="detail = row">详情</el-button><el-button v-if="row.versionId" link type="primary" @click="state.focusVersion = row.versionId; $emit('navigate', 'versions')">成果</el-button><el-button v-if="row.status === '失败'" link type="primary" @click="detail = runTask({ ...JSON.parse(JSON.stringify(row)), id: uid('task'), fail: false })">重试</el-button></template></el-table-column></el-table><el-pagination v-model:current-page="pageNo" :page-size="8" :total="tasks.length" layout="total, prev, pager, next" /></section>
   </template>
@@ -214,13 +262,27 @@ function evaluate() { if (!compareModels.value.length || !evaluationFile.value) 
   <AnnotationPanel v-if="['generation','annotation'].includes(page)" v-show="annotationMode === '人工与辅助标注'" @navigate="$emit('navigate', $event)" />
 
   <section v-if="page === 'models'" class="panel"><el-tabs v-if="!modelSection" v-model="tab"><el-tab-pane v-for="name in ['模型配置', '模型试用', '模型评测']" :key="name" :label="name" :name="name" /></el-tabs>
-    <template v-if="tab === '模型配置'"><div class="section-title"><div v-if="!modelSection"><h3>可用模型</h3><p>配置模型服务信息，本演示不发送外部请求或保存真实密钥</p></div><span v-else class="muted">{{ state.models.length }} 个模型</span><el-button type="primary" :disabled="!allowed('edit')" @click="addModel()"><el-icon><Plus /></el-icon>新增模型</el-button></div><el-table :data="state.models"><el-table-column label="模型名称" prop="name" /><el-table-column label="服务地址" prop="address" min-width="230" /><el-table-column label="类型" prop="type" /><el-table-column label="状态" prop="status" /><el-table-column label="操作"><template #default="{ row }"><el-button link type="primary" :disabled="!allowed('edit')" @click="addModel(row)">编辑</el-button></template></el-table-column></el-table></template>
-    <template v-if="tab === '模型试用'"><div class="toolbar"><el-select v-model="modelChoice" placeholder="选择模型"><el-option v-for="model in state.models.filter(m => m.status === '已上架')" :key="model.id" :label="model.name" :value="model.id" /></el-select><el-tag type="info">模拟对话</el-tag></div><div class="chat-window"><el-empty v-if="!chatMessages.length" description="输入问题，体验模型问答界面" /><div v-for="(message, i) in chatMessages" :key="i" class="chat-message" :class="{ user: message.role === '您' }"><b>{{ message.role }}</b><p>{{ message.text }}</p><el-button link size="small" @click="copy(message.text)">复制内容</el-button></div></div><div class="chat-input"><el-input v-model="chatText" placeholder="输入您的问题" @keyup.enter="sendChat" /><el-button type="primary" @click="sendChat">发送</el-button></div></template>
-    <template v-if="tab === '模型评测'"><div class="evaluation-form"><template v-if="!modelSection"><h3>创建模型评测</h3><p class="muted">上传评测文件，选择模型并比较模拟结果。</p></template><input type="file" accept=".json,.jsonl,.csv,.txt" @change="evaluationFile = $event.target.files[0]?.name || ''" /><el-select v-model="compareModels" multiple placeholder="选择评测模型"><el-option v-for="model in state.models" :key="model.id" :label="model.name" :value="model.id" /></el-select><el-button type="primary" :loading="evaluation" @click="evaluate">开始评测（模拟）</el-button></div><el-table v-if="evaluationResults.length" :data="evaluationResults"><el-table-column label="模型" prop="name" /><el-table-column label="准确性（模拟）" prop="accuracy" /><el-table-column label="完整性（模拟）" prop="completeness" /><el-table-column label="耗时（模拟）" prop="time" /><el-table-column label="示例条数" prop="samples" /></el-table></template>
+    <template v-if="tab === '模型配置'"><div class="section-title"><div v-if="!modelSection"><h3>可用模型</h3></div><span v-else class="muted">{{ state.models.length }} 个模型</span><el-button type="primary" :disabled="!allowed('edit')" @click="addModel()"><el-icon><Plus /></el-icon>新增模型</el-button></div><el-table :data="state.models"><el-table-column label="模型名称" prop="name" /><el-table-column label="服务地址" prop="address" min-width="230" /><el-table-column label="类型" prop="type" /><el-table-column label="状态" prop="status" /><el-table-column label="操作"><template #default="{ row }"><el-button link type="primary" :disabled="!allowed('edit')" @click="addModel(row)">编辑</el-button></template></el-table-column></el-table></template>
+    <template v-if="tab === '模型试用'"><div class="toolbar"><el-select v-model="modelChoice" placeholder="选择模型"><el-option v-for="model in state.models.filter(m => m.status === '已上架')" :key="model.id" :label="model.name" :value="model.id" /></el-select></div><div class="chat-window"><el-empty v-if="!chatMessages.length" description="输入问题，体验模型问答界面" /><div v-for="(message, i) in chatMessages" :key="i" class="chat-message" :class="{ user: message.role === '您' }"><b>{{ message.role }}</b><p>{{ message.text }}</p><el-button link size="small" @click="copy(message.text)">复制内容</el-button></div></div><div class="chat-input"><el-input v-model="chatText" placeholder="输入您的问题" @keyup.enter="sendChat" /><el-button type="primary" @click="sendChat">发送</el-button></div></template>
+    <template v-if="tab === '模型评测'">
+      <div class="evaluation-setup">
+        <section class="evaluation-data"><div class="section-title"><h3><el-icon><Document /></el-icon>评测内容</h3><el-button link type="primary" :disabled="evaluation" @click="useEvaluationSample">使用问答样例</el-button></div>
+          <input ref="evaluationInput" type="file" accept=".json,.jsonl,.csv,.txt" hidden :disabled="evaluation" @change="uploadEvaluation" />
+          <button class="evaluation-upload" :disabled="evaluation" @click="evaluationInput?.click()"><el-icon><UploadFilled /></el-icon><b>{{ evaluationFile ? '重新选择文件' : '选择评测文件' }}</b><span>JSON / JSONL / CSV / TXT</span></button>
+          <div v-if="evaluationFile" class="evaluation-file"><el-icon><Document /></el-icon><span><b>{{ evaluationFile }}</b><small>{{ evaluationRecords.length }} 条评测内容</small></span><el-button text :disabled="evaluation" aria-label="移除评测文件" @click="clearEvaluationFile"><el-icon><Close /></el-icon></el-button></div>
+        </section>
+        <section class="evaluation-models"><div class="section-title"><h3><el-icon><Cpu /></el-icon>评测模型</h3><span>{{ compareModels.filter(id => availableEvaluationModels.some(model => model.id === id)).length }} 个已选</span></div>
+          <el-checkbox-group v-model="compareModels" :disabled="evaluation" class="evaluation-model-list"><el-checkbox v-for="model in availableEvaluationModels" :key="model.id" :value="model.id" border><span class="evaluation-model-icon"><el-icon><Cpu /></el-icon></span><span><b>{{ model.name }}</b><small>{{ model.type }}</small></span></el-checkbox></el-checkbox-group><el-empty v-if="!availableEvaluationModels.length" :image-size="50" description="请先在模型配置中添加并上架模型" />
+        </section>
+      </div>
+      <section v-if="evaluationRecords.length" class="evaluation-preview"><div class="section-title"><h3><el-icon><View /></el-icon>内容预览</h3><span>前 {{ Math.min(3, evaluationRecords.length) }} 条</span></div><el-table :data="evaluationRecords.slice(0,3)"><el-table-column type="index" label="序号" width="65" /><el-table-column prop="question" label="问题" min-width="230" show-overflow-tooltip /><el-table-column prop="answer" label="参考答案" min-width="280" show-overflow-tooltip><template #default="{row}">{{ row.answer || '未提供' }}</template></el-table-column></el-table></section>
+      <div class="evaluation-actions"><el-button type="primary" :disabled="!canEvaluate" :loading="evaluation" @click="evaluate"><el-icon v-if="!evaluation"><DataAnalysis /></el-icon>{{ evaluation ? '正在评测' : '开始评测' }}</el-button></div>
+      <section class="evaluation-results"><div class="section-title"><h3><el-icon><DataAnalysis /></el-icon>模型对比</h3><el-tag v-if="evaluationResults.length" type="info">示例评分</el-tag></div><el-table v-if="evaluationResults.length" :data="evaluationResults"><el-table-column label="模型" prop="name" min-width="180" /><el-table-column label="准确性" min-width="170"><template #default="{row}"><el-progress :percentage="row.accuracy" :stroke-width="7" /></template></el-table-column><el-table-column label="完整性" min-width="170"><template #default="{row}"><el-progress :percentage="row.completeness" :stroke-width="7" color="#38a78c" /></template></el-table-column><el-table-column label="平均响应耗时" prop="time" min-width="140" /><el-table-column label="评测条数" prop="samples" width="100" /></el-table><el-empty v-else :image-size="65" description="选择评测内容和模型后，开始评测" /></section>
+    </template>
   </section>
 
   <FormDialog v-model="dialog" :assist="dialogTitle === '新建数据集' ? { name: '土壤科研问答数据集', scene: '土壤环境科研问答', demand: '将试验报告与采样记录加工为可追溯的问答数据。', quality: '数值准确；保留参考材料；不编造产量结论', source: '试验报告与采样记录' } : undefined" :title="dialogTitle" :fields="fields" :initial="initial" @save="saveForm" />
   <input ref="fileInput" type="file" multiple hidden @change="upload" />
-  <el-dialog v-model="importDialog" title="接入数据" width="760"><el-tabs v-model="importTab"><el-tab-pane v-for="name in ['文件上传', '条目导入', 'SDK导入', 'MySQL接入']" :key="name" :label="name" :name="name" /></el-tabs><template v-if="importTab === '文件上传'"><button class="upload-zone" :disabled="uploadBusy" @click="fileInput.click()"><el-icon><UploadFilled /></el-icon><h3>{{ uploadBusy ? '正在导入…' : '点击选择本地资料' }}</h3><p>支持文档、表格、图片和JSON条目数据</p><small>文件保存在当前浏览器内；解析使用模拟结果。</small></button></template><template v-if="importTab === '条目导入'"><p>粘贴JSON数组，支持question/answer或instruction/output字段。</p><el-input v-model="manualText" type="textarea" :rows="9" placeholder='[{"question":"采样深度是多少？","answer":"0—20厘米"}]' /><div class="dialog-actions"><el-button type="primary" @click="importEntries">导入条目</el-button></div></template><template v-if="importTab === 'SDK导入'"><el-alert title="SDK调用示例，仅展示接入方式，不连接后端。" type="info" :closable="false" /><pre>{{ sdkCode }}</pre><el-button @click="copy(sdkCode)">复制示例</el-button><el-button type="primary" @click="manualText = JSON.stringify([{ question: '采样深度是多少？', answer: '0—20厘米' }]); importEntries()">导入模拟SDK数据</el-button></template><template v-if="importTab === 'MySQL接入'"><el-alert title="模拟数据库连接，不会访问真实数据库。" type="info" :closable="false" /><el-form label-position="top" class="dialog-form"><div class="two-cols"><el-form-item label="Host与Port"><el-input v-model="dbConfig.host" /></el-form-item><el-form-item label="用户名"><el-input v-model="dbConfig.username" /></el-form-item></div><el-button @click="databaseConnected = Boolean(dbConfig.host && dbConfig.username)">测试连接（模拟）</el-button><el-tag v-if="databaseConnected" type="success">连接成功（模拟）</el-tag><template v-if="databaseConnected"><div class="two-cols"><el-form-item label="数据库"><el-input v-model="dbConfig.database" /></el-form-item><el-form-item label="数据表"><el-input v-model="dbConfig.table" /></el-form-item></div><el-form-item label="选择字段"><el-checkbox-group v-model="dbConfig.fields"><el-checkbox v-for="key in Object.keys(tableSamples[0])" :key="key" :value="key">{{ key }}</el-checkbox></el-checkbox-group></el-form-item><el-form-item label="筛选条件（演示配置）"><el-input v-model="dbConfig.condition" placeholder="例如 sampling_depth > 0" /></el-form-item><el-table :data="tableSamples"><el-table-column v-for="key in dbConfig.fields" :key="key" :label="key" :prop="key" /></el-table><el-button type="primary" @click="importDatabase">导入模拟记录</el-button></template></el-form></template></el-dialog>
+  <el-dialog v-model="importDialog" title="接入数据" width="760"><el-tabs v-model="importTab"><el-tab-pane v-for="name in ['文件上传', '条目导入', 'SDK导入', 'MySQL接入']" :key="name" :label="name" :name="name" /></el-tabs><template v-if="importTab === '文件上传'"><button class="upload-zone" :disabled="uploadBusy" @click="fileInput.click()"><el-icon><UploadFilled /></el-icon><h3>{{ uploadBusy ? '正在导入…' : '点击选择本地资料' }}</h3><p>支持文档、表格、图片和JSON条目数据</p></button></template><template v-if="importTab === '条目导入'"><p>粘贴JSON数组，支持question/answer或instruction/output字段。</p><el-input v-model="manualText" type="textarea" :rows="9" placeholder='[{"question":"采样深度是多少？","answer":"0—20厘米"}]' /><div class="dialog-actions"><el-button type="primary" @click="importEntries">导入条目</el-button></div></template><template v-if="importTab === 'SDK导入'"><pre>{{ sdkCode }}</pre><el-button @click="copy(sdkCode)">复制示例</el-button><el-button type="primary" @click="manualText = JSON.stringify([{ question: '采样深度是多少？', answer: '0—20厘米' }]); importEntries()">导入模拟SDK数据</el-button></template><template v-if="importTab === 'MySQL接入'"><el-form label-position="top" class="dialog-form"><div class="two-cols"><el-form-item label="Host与Port"><el-input v-model="dbConfig.host" /></el-form-item><el-form-item label="用户名"><el-input v-model="dbConfig.username" /></el-form-item></div><el-button @click="databaseConnected = Boolean(dbConfig.host && dbConfig.username)">测试连接（模拟）</el-button><el-tag v-if="databaseConnected" type="success">连接成功（模拟）</el-tag><template v-if="databaseConnected"><div class="two-cols"><el-form-item label="数据库"><el-input v-model="dbConfig.database" /></el-form-item><el-form-item label="数据表"><el-input v-model="dbConfig.table" /></el-form-item></div><el-form-item label="选择字段"><el-checkbox-group v-model="dbConfig.fields"><el-checkbox v-for="key in Object.keys(tableSamples[0])" :key="key" :value="key">{{ key }}</el-checkbox></el-checkbox-group></el-form-item><el-form-item label="筛选条件（演示配置）"><el-input v-model="dbConfig.condition" placeholder="例如 sampling_depth > 0" /></el-form-item><el-table :data="tableSamples"><el-table-column v-for="key in dbConfig.fields" :key="key" :label="key" :prop="key" /></el-table><el-button type="primary" @click="importDatabase">导入模拟记录</el-button></template></el-form></template></el-dialog>
   <el-drawer :model-value="Boolean(detail)" :title="detail?.name || '详情'" size="620" @close="detail = null"><template v-if="detail"><el-descriptions :column="1" border><el-descriptions-item v-for="key in Object.keys(detail).filter(k => !['content','logs','config','id','datasetId','fail','hasFile','sourceId','versionId'].includes(k) && typeof detail[k] !== 'object')" :key="key" :label="({name:'名称',type:'类型',status:'状态',created:'创建时间',size:'大小',scene:'场景',quality:'质量要求',source:'来源',format:'格式',scale:'量级',project:'项目',level:'等级',demand:'需求',sourceId:'来源编号',versionId:'成果编号',progress:'进度'})[key] || key">{{ detail[key] }}</el-descriptions-item></el-descriptions><template v-if="detail.logs"><h3>执行日志</h3><pre>{{ detail.logs.join('\n') }}</pre><h3>任务配置</h3><pre>{{ JSON.stringify(detail.config || {}, null, 2) }}</pre><el-button v-if="detail.versionId" type="primary" @click="state.focusVersion = detail.versionId; detail = null; $emit('navigate', 'versions')">查看输出成果</el-button><el-button v-if="detail.status === '已完成'" type="primary" @click="continueTask(detail)"><el-icon><ArrowRight /></el-icon>{{ detail.type.includes('解析') ? '使用结果继续清洗' : detail.type.includes('清洗') ? '开始标注' : '检查与导出' }}</el-button></template><template v-else-if="detail.content"><h3>原始内容</h3><img v-if="detail.content.startsWith('data:image')" :src="detail.content" class="preview-image" /><pre v-else>{{ detail.content }}</pre></template><el-empty v-else-if="detail.hasFile" description="该格式使用模拟解析，可下载原文件查看" /><el-button v-if="detail.hasFile && allowed('edit')" @click="downloadSource(detail)">查看原始文件</el-button></template></el-drawer>
 </template>

@@ -1,8 +1,16 @@
 export const uid = (prefix = 'id') => `${prefix}-${crypto.randomUUID()}`
 export const now = () => new Date().toLocaleString('zh-CN', { hour12: false })
 
-export function canDownload(version, requests, user) {
-  return version?.status === '已发布' && isDatasetVersion(version) && requests.some(r => r.versionId === version.id && r.user === user && r.status === '已通过')
+export function isDatasetOwner(dataset, user) {
+  return Boolean(dataset && (dataset.owner || '管理员') === user)
+}
+
+export function isVersionAuthorized(version, requests, user, dataset) {
+  return version?.status === '已发布' && isDatasetVersion(version) && !isDatasetOwner(dataset, user) && requests.some(r => r.versionId === version.id && r.user === user && r.status === '已通过')
+}
+
+export function canDownload(version, requests, user, dataset) {
+  return version?.status === '已发布' && isDatasetVersion(version) && (isDatasetOwner(dataset, user) || isVersionAuthorized(version, requests, user, dataset))
 }
 
 export function isDatasetVersion(result) {
@@ -107,4 +115,38 @@ export function ensureProjects(data) {
   }
   if (!data.projects.some(p => p.id === data.activeProject)) data.activeProject = data.datasets.find(d => d.id === data.activeDataset)?.projectId || data.projects[0]?.id || ''
   return data
+}
+
+
+export function ensureChatSessions(data) {
+  if (!Array.isArray(data.chatSessions)) {
+    data.chatSessions = []
+    if (data.conversations?.length) {
+      data.chatSessions.push({ id:uid('chat'), owner:data.role, title:(data.conversations.find(message=>message.role==='您')?.text || '历史会话').slice(0,28), messages:data.conversations, draft:'', modelId:'', createdAt:0, updatedAt:0 })
+    }
+  }
+  const current = data.chatSessions.find(session=>session.id===data.activeChatId && session.owner===data.role) || data.chatSessions.find(session=>session.owner===data.role)
+  data.activeChatId = current?.id || ''
+  data.conversations = current?.messages || []
+  return data
+}
+
+export function createChatSession(data, modelId = '') {
+  ensureChatSessions(data)
+  const current = data.chatSessions.find(session=>session.id===data.activeChatId)
+  if (current && !current.messages.length && !current.draft) return current
+  const timestamp=Date.now()
+  data.chatSessions.unshift({ id:uid('chat'), owner:data.role, title:'新聊天', messages:[], draft:'', modelId, createdAt:timestamp, updatedAt:timestamp })
+  const session=data.chatSessions[0]
+  data.activeChatId=session.id
+  data.conversations=session.messages
+  return session
+}
+
+export function selectChatSession(data, id) {
+  const session=data.chatSessions.find(item=>item.id===id && item.owner===data.role)
+  if (!session) return false
+  data.activeChatId=session.id
+  data.conversations=session.messages
+  return true
 }

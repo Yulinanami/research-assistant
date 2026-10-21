@@ -1,9 +1,9 @@
 import { reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { initialData, qaSamples, researchText, imageCleaningSamples } from './data'
-import { uid, now, createVersion, canDownload, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords, ensureProjects } from './domain'
+import { initialData, qaSamples, researchText, imageCleaningSamples, addIndustryDatasets } from './data'
+import { uid, now, createVersion, canDownload, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords, ensureProjects, ensureChatSessions } from './domain'
 
-export const state = reactive(ensureProjects(initialData()))
+export const state = reactive(ensureProjects(ensureChatSessions(initialData())))
 export const storage = reactive({ ready: false, error: '', saving: false })
 let db
 let pendingSaves = 0
@@ -30,8 +30,10 @@ export async function initialize() {
       request.onerror = () => reject(request.error)
     })
     const saved = await transact('readonly', store => store.get('state'))
-    if (saved) Object.assign(state, saved)
+    if (saved) { Object.assign(state, saved); state.industrySeedsVersion = saved.industrySeedsVersion || 0; if (!Array.isArray(saved.chatSessions)) { state.chatSessions=undefined; state.activeChatId='' } }
+    addIndustryDatasets(state)
     ensureProjects(state)
+    ensureChatSessions(state)
     for (const task of state.tasks) {
       if (task.status === '执行中') { task.status = '失败'; task.logs.push('页面刷新中断了模拟任务，请重试。') }
     }
@@ -165,10 +167,12 @@ export async function deleteSource(source) {
   state.sources.splice(state.sources.indexOf(source), 1)
 }
 export function downloadVersion(version, format = 'json') {
-  if (!requireAction('download', version.datasetId) || !canDownload(version, state.requests, state.role)) return ElMessage.warning('请先申请当前版本并等待审批通过。')
+  if (!requireAction('download', version.datasetId) || !canDownload(version, state.requests, state.role, state.datasets.find(d => d.id === version.datasetId))) return ElMessage.warning('请先申请当前版本并等待审批通过。')
   const records = exportRecords(version.records)
   const content = format === 'md' ? records.map(r => r.question ? `## ${r.question}\n\n${r.answer}\n\n> 来源：${r.reference || '未提供'}` : `## ${r.title || '内容'}\n\n${r.content || JSON.stringify(r)}`).join('\n\n') : JSON.stringify(records, null, 2)
   saveDownload(content, `${datasetName(version.datasetId)}-v${version.number}.${format}`, format === 'md' ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8')
+  const dataset = state.datasets.find(dataset => dataset.id === version.datasetId)
+  if (dataset) dataset.downloads = (dataset.downloads || 0) + 1
 }
 export function review(version, approved, note) {
   if (!requireAction('review', version.datasetId)) return
@@ -184,5 +188,5 @@ export async function resetDemo() {
   generation++
   activeTimers.forEach(clearTimeout); activeTimers.clear()
   if (db) await transact('readwrite', store => store.clear())
-  Object.assign(state, ensureProjects(initialData())); notify('已恢复初始演示数据')
+  Object.assign(state, ensureProjects(ensureChatSessions(initialData()))); notify('已恢复初始演示数据')
 }

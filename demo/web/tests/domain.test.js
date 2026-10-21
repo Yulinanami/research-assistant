@@ -1,6 +1,7 @@
+import { initialData, addIndustryDatasets } from '../src/data.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { canDownload, createVersion, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords, ensureProjects } from '../src/domain.js'
+import { canDownload, createVersion, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords, ensureProjects, isVersionAuthorized, ensureChatSessions, createChatSession, selectChatSession } from '../src/domain.js'
 
 test('下载授权必须属于当前用户和当前发布版本', () => {
   const version = { id: 'v1', status: '已发布' }
@@ -154,4 +155,180 @@ test('旧项目迁移保留ID及授权，多数据集归属同一项目且重复
   const ids = data.projects.map(p => p.id)
   ensureProjects(data)
   assert.deepEqual(data.projects.map(p => p.id), ids)
+})
+
+
+test('自己的数据无需授权，他人数据只授权审批通过的版本', () => {
+  const dataset = { id: 'd', owner: '创建者' }
+  const version = { id: 'v1', datasetId: 'd', status: '已发布', kind: 'dataset' }
+  const selfRequest = [{ versionId: 'v1', user: '创建者', status: '已通过' }]
+  assert.equal(isVersionAuthorized(version, selfRequest, '创建者', dataset), false)
+  assert.equal(canDownload(version, [], '创建者', dataset), true)
+  assert.equal(canDownload(version, [], '申请者', dataset), false)
+  const requests = [{ versionId: 'v1', user: '申请者', status: '已通过' }]
+  assert.equal(isVersionAuthorized(version, requests, '申请者', dataset), true)
+  assert.equal(canDownload(version, requests, '申请者', dataset), true)
+  assert.equal(canDownload({ ...version, id: 'v2' }, requests, '申请者', dataset), false)
+  assert.equal(canDownload({ ...version, status: '草稿' }, [], '创建者', dataset), false)
+})
+
+
+test('行业样例补充10个且不覆盖旧内容，推荐6个，重复加载不追加', () => {
+  const data = { datasets: [{ id: 'my-data', name: '用户数据', owner: '管理员' }], versions: [{ id: 'my-version', datasetId: 'my-data', records: [{ content: '原内容' }] }], sources: [], requests: [{ id: 'my-request' }] }
+  const original = JSON.stringify(data)
+  addIndustryDatasets(data)
+  assert.equal(data.datasets.length, 11)
+  assert.equal(new Set(data.datasets.slice(1).map(d=>d.industry)).size, 10)
+  assert.ok(new Set(data.datasets.slice(1).map(d=>d.type)).size >= 5)
+  assert.equal(data.datasets.filter(d=>d.recommendationRank).length, 6)
+  assert.equal(data.datasets.filter(d=>d.owner==='管理员').length, 1)
+  for (const dataset of data.datasets.slice(1)) {
+    const version = data.versions.find(v=>v.datasetId===dataset.id)
+    assert.equal(version.status, '已发布')
+    assert.equal(version.release.versionId, version.id)
+    assert.ok(version.records.length > 0)
+    assert.ok(data.sources.some(source=>source.id===version.sourceId))
+  }
+  assert.equal(JSON.stringify({ datasets: data.datasets.slice(0,1), versions: data.versions.slice(0,1), sources: [], requests: data.requests }),original)
+  const count = data.datasets.length
+  addIndustryDatasets(data)
+  assert.equal(data.datasets.length,count)
+  data.datasets.pop()
+  addIndustryDatasets(data)
+  assert.equal(data.datasets.length,count-1)
+  assert.equal(initialData().datasets.length,12)
+})
+
+
+test('旧聊天迁入历史且重复初始化不复制、不丢失消息', () => {
+  const oldMessages = [{role:'您',text:'原问题'},{role:'模型',text:'原回答'}]
+  const data = { role:'管理员', conversations:oldMessages }
+  ensureChatSessions(data)
+  assert.equal(data.chatSessions.length,1)
+  assert.deepEqual(data.chatSessions[0].messages,oldMessages)
+  assert.equal(data.chatSessions[0].title,'原问题')
+  ensureChatSessions(data)
+  assert.equal(data.chatSessions.length,1)
+})
+
+test('新建和切换会话保留各自草稿模型消息，空白聊天不重复创建', () => {
+  const data = {role:'管理员',conversations:[]}
+  const first = createChatSession(data,'model-a')
+  assert.equal(createChatSession(data,'model-a').id,first.id)
+  first.draft='未发送内容'
+  const second=createChatSession(data,'model-b')
+  assert.notEqual(second.id,first.id)
+  second.messages.push({role:'您',text:'第二段内容'})
+  assert.equal(selectChatSession(data,first.id),true)
+  assert.equal(data.chatSessions.find(s=>s.id===data.activeChatId).draft,'未发送内容')
+  assert.equal(data.chatSessions.find(s=>s.id===data.activeChatId).modelId,'model-a')
+  assert.equal(data.conversations.length,0)
+  selectChatSession(data,second.id)
+  assert.equal(data.conversations[0].text,'第二段内容')
+  data.role='其他用户'
+  assert.equal(selectChatSession(data,first.id),false)
+  ensureChatSessions(data)
+  assert.equal(data.activeChatId,'')
+  assert.equal(data.chatSessions.length,2)
+})
+
+
+test('内置样例预设下载基数，旧下载累计保留，重复加载不加倍且不修改自建数据', () => {
+  const fresh = initialData()
+  assert.equal(fresh.datasets.length, 12)
+  assert.ok(fresh.datasets.every(dataset => dataset.downloads > 0))
+  const sorted = fresh.datasets.filter(dataset => fresh.versions.some(version => version.datasetId === dataset.id && version.status === '已发布' && isDatasetVersion(version))).sort((a,b) => b.downloads - a.downloads).slice(0,6)
+  assert.deepEqual(sorted.map(dataset => dataset.id), ['industry-traffic','industry-health','industry-retail','industry-finance','industry-agriculture','industry-industry'])
+  const saved = { ...fresh, datasets: [{ id:'soil', downloads:5 }, { id:'my-dataset', downloads:9 }] }
+  addIndustryDatasets(saved)
+  assert.equal(saved.datasets[0].downloads, 1373)
+  assert.deepEqual(saved.datasets[1], { id:'my-dataset', downloads:9 })
+  saved.datasets[0].downloads++
+  addIndustryDatasets(saved)
+  assert.equal(saved.datasets[0].downloads, 1374)
+})
+
+
+test('内置样例补充个人用户ID和完整简介，旧记录与自建数据保持', () => {
+  const data = initialData()
+  assert.ok(data.datasets.every(dataset => /^[a-z0-9_]+$/.test(dataset.publisherId)))
+  assert.equal(data.versions.find(version => version.id === 'soil-v1').release.publisher, 'lin_chen_073')
+  assert.ok(data.datasets.every(dataset => dataset.introduction.length > 100))
+  const own = { id:'own-profile', owner:'管理员', demand:'自己的介绍' }
+  const saved = { ...data, datasets:[{ id:'industry-health', downloads:7, downloadsSeeded:true }, own] }
+  addIndustryDatasets(saved)
+  assert.equal(saved.datasets[0].publisherId, 'nina_wang_218')
+  assert.equal(saved.datasets[0].downloads, 7)
+  saved.datasets[0].introduction = '用户修改后的介绍'
+  addIndustryDatasets(saved)
+  assert.equal(saved.datasets[0].introduction, '用户修改后的介绍')
+  assert.deepEqual(saved.datasets[1], own)
+})
+
+
+test('样例发布历史数量和Tag各不相同，已有版本保持且重复加载不追加', () => {
+  const data = initialData()
+  const published = data.datasets.map(dataset => data.versions.filter(version => version.datasetId === dataset.id && version.status === '已发布')).filter(versions => versions.length)
+  assert.equal(published.length, 11)
+  assert.ok(new Set(published.map(versions => versions.length)).size >= 4)
+  assert.ok(published.every(versions => versions.length >= 2))
+  const traffic = data.versions.filter(version => version.datasetId === 'industry-traffic').sort((a,b) => b.number - a.number)
+  assert.equal(traffic.length, 6)
+  assert.equal(traffic[0].release.tag, 'v2.3.1')
+  assert.notEqual(traffic[0].records, traffic[1].records)
+  const before = JSON.stringify(data.versions)
+  addIndustryDatasets(data)
+  assert.equal(JSON.stringify(data.versions), before)
+  const saved = initialData()
+  saved.versions = saved.versions.filter(version => !version.id.startsWith('sample-'))
+  delete saved.datasets.find(dataset => dataset.id === 'industry-health').sampleVersionsSeeded
+  const ownVersion = { id:'user-health-version', datasetId:'industry-health', number:42, records:[{ content:'用户原内容' }], status:'草稿' }
+  saved.versions.push(ownVersion)
+  addIndustryDatasets(saved)
+  assert.deepEqual(ownVersion, { id:'user-health-version', datasetId:'industry-health', number:42, records:[{ content:'用户原内容' }], status:'草稿' })
+  assert.equal(Math.max(...saved.versions.filter(version => version.datasetId === 'industry-health').map(version => version.number)), 42)
+})
+
+
+test('样例发布时间错开且历史递增，迁移保留用户时间与重复加载结果', () => {
+  const data = initialData()
+  const times = []
+  for (const dataset of data.datasets) {
+    const versions = data.versions.filter(version => version.datasetId === dataset.id && version.status === '已发布').sort((a,b) => a.number - b.number)
+    if (!versions.length) continue
+    const stamps = versions.map(version => Date.parse(version.release.publishedAt))
+    assert.ok(stamps.every((stamp, index) => !index || stamp > stamps[index-1]))
+    times.push(versions.at(-1).release.publishedAt)
+  }
+  assert.equal(new Set(times).size, 11)
+  assert.ok(new Set(times.map(time => time.slice(0,7))).size >= 6)
+  assert.ok(Math.max(...times.map(Date.parse)) - Math.min(...times.map(Date.parse)) > 150 * 86400000)
+  const health = data.datasets.find(dataset => dataset.id === 'industry-health')
+  delete health.sampleReleaseTimesSeeded
+  const userVersion = { id:'user-time', datasetId:health.id, number:99, status:'已发布', published:'2026/10/22 08:31:00', release:{publishedAt:'2026/10/22 08:31:00'} }
+  data.versions.push(userVersion)
+  addIndustryDatasets(data)
+  assert.equal(userVersion.release.publishedAt, '2026/10/22 08:31:00')
+  const before = JSON.stringify(data.versions)
+  addIndustryDatasets(data)
+  assert.equal(JSON.stringify(data.versions), before)
+})
+
+
+test('样例总量各异且历史版本递增，总量与预览分开，用户记录保持', () => {
+  const data = initialData(), totals = []
+  for (const dataset of data.datasets) {
+    const versions = data.versions.filter(version => version.datasetId === dataset.id && version.status === '已发布').sort((a,b)=>a.number-b.number)
+    if (!versions.length) continue
+    assert.ok(versions.every(version => version.totalRecords > version.records.length))
+    assert.ok(versions.every((version,index) => !index || version.totalRecords > versions[index-1].totalRecords))
+    totals.push(versions.at(-1).totalRecords)
+  }
+  assert.equal(new Set(totals).size, 11)
+  const userVersion = { id:'user-scale',datasetId:'industry-health',number:99,status:'已发布',records:[{question:'用户数据'}] }
+  data.versions.push(userVersion)
+  const before = JSON.stringify(data.versions)
+  addIndustryDatasets(data)
+  assert.equal(JSON.stringify(data.versions),before)
+  assert.equal(userVersion.totalRecords,undefined)
 })
