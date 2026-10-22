@@ -15,7 +15,7 @@ const metrics = computed(() => [
 ])
 const shortcuts = [
   { title: '接入科研资料', description: '上传文档、表格或导入数据', icon: 'UploadFilled', page: 'sources', color: 'blue' },
-  { title: '解析与清洗', description: '提取文档内容，规范数据格式', icon: 'SetUp', page: 'processing', color: 'teal' },
+  { title: '数据预处理', description: '确认资料与解析结果，进入清洗流程', icon: 'SetUp', page: 'processing', color: 'teal' },
   { title: '生成问答数据', description: '从资料构建可用的问答对', icon: 'MagicStick', page: 'generation', color: 'purple' },
   { title: '发现数据成果', description: '浏览已发布数据并申请使用', icon: 'Grid', page: 'catalog', color: 'amber' },
 ]

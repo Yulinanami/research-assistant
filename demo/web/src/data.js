@@ -1,22 +1,18 @@
 export const navigation = [
-  { title: '工作空间', items: [{ id: 'home', title: '工作台', icon: 'House', subtitle: '科研数据，从资料到成果' }] },
-  { title: '数据加工', items: [
-    { id: 'planning', title: '数据集需求与规划', icon: 'FolderOpened', subtitle: '明确数据用途，建立数据集建设计划' },
-    { id: 'sources', title: '数据采集与语料管理', icon: 'UploadFilled', subtitle: '统一接入文档、表格和待标注数据' },
-    { id: 'processing', title: '数据预处理', icon: 'SetUp', subtitle: '解析文档，清洗并规范原始数据' },
-    { id: 'generation', title: '知识片段与问答生成', icon: 'MagicStick', subtitle: '从文档内容生成片段、问题与答案' },
-    { id: 'annotation', title: '数据标注', icon: 'EditPen', subtitle: '结合人工标注与模型建议，完善数据内容' },
-    { id: 'models', title: '模型使用与评测', icon: 'Cpu', subtitle: '配置模型，试用并比较回答效果' },
+  { title: '工作空间', items: [
+    { id:'workbench', title:'工作台', icon:'DataAnalysis', subtitle:'从项目出发，查看任务、待办与数据统计' },
+    { id:'projects', title:'数据加工', icon:'SetUp', subtitle:'以项目为单位组织资料、加工任务与数据成果' },
+    { id:'mydatasets', title:'我的数据集', icon:'Files', subtitle:'查看本人拥有的数据集，打开项目继续建设' },
   ] },
-  { title: '数据治理与共享管理', items: [
-    { id: 'standards', title: '数据标准与字典', icon: 'Collection', subtitle: '统一术语、字段定义和数据处理规范' },
-    { id: 'review', title: '数据质量审核', icon: 'CircleCheck', subtitle: '检查成果质量，完成审核与修订' },
-    { id: 'versions', title: '数据成果与版本管理', icon: 'Files', subtitle: '查看加工成果，管理审核和发布版本' },
-    { id: 'catalog', title: '数据目录', icon: 'Grid', subtitle: '发现、预览并申请使用科研数据成果' },
-    { id: 'requests', title: '使用申请与审批', icon: 'DocumentChecked', subtitle: '申请使用数据，跟踪审批与授权结果' },
-    { id: 'permissions', title: '权限管理', icon: 'Lock', subtitle: '按角色、项目和数据等级设置访问权限' },
-    { id: 'services', title: '数据服务', icon: 'Connection', subtitle: '将已发布的数据成果提供为标准接口' },
-    { id: 'statistics', title: '数据与任务统计', icon: 'DataAnalysis', subtitle: '了解数据规模和加工任务进展' },
+  { title:'数据治理与共享', items:[
+    { id:'catalog', title:'数据目录', icon:'Collection', subtitle:'管理本人拥有及申请获批的数据集' },
+    { id:'square', title:'数据广场', icon:'Grid', subtitle:'发现已发布成果，预览并申请使用' },
+    { id:'standards', title:'数据标准与字典', icon:'Document', subtitle:'统一业务字段、标签与数据规范' },
+    { id:'audit', title:'质量审核', icon:'CircleCheck', subtitle:'跨项目检查已提交的成果版本，记录审核意见与退回原因' },
+    { id:'release', title:'成果发布', icon:'Upload', subtitle:'发布审核通过的成果，管理发布信息与版本记录' },
+    { id:'requests', title:'使用申请与审批', icon:'DocumentChecked', subtitle:'按发布版本申请和授予数据使用权限' },
+    { id:'permissions', title:'权限管理', icon:'Lock', subtitle:'按角色、项目和数据等级设置访问权限' },
+    { id:'services', title:'数据服务', icon:'Connection', subtitle:'为已发布版本配置数据接口示例' },
   ] },
 ]
 

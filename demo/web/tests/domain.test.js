@@ -2,6 +2,25 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { canDownload, createVersion, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords } from '../src/domain.js'
 
+test('字符切片不会拆断 emoji、组合字符或家庭表情', () => {
+  const parts = splitText('甲😀e\u0301👨‍👩‍👧乙', {size:1,chunkType:'固定大小'})
+  assert.deepEqual(parts, ['甲','😀','e\u0301','👨‍👩‍👧','乙'])
+})
+
+test('再次增强不重复扩充相同问题，也不叠加受众前缀', () => {
+  const input = [{question:'土壤含水量是什么？',answer:'正文',correctedAnswer:'人工答案',label:'可用'}]
+  const first = augmentRecords(input, '学生')
+  const second = augmentRecords(first, '学生')
+  assert.equal(second.length, 2)
+  assert.equal(second[1].answer, '人工答案')
+  const changed = augmentRecords(second, '科研人员')
+  assert.equal(changed.length, 3)
+  assert.equal(changed[2].question, '请向科研人员说明：土壤含水量是什么？')
+  assert.equal(input[0].question, '土壤含水量是什么？')
+  const repeated = [{question:'相同问题',answer:'相同答案',sourceId:'a'}, {question:'相同问题',answer:'相同答案',sourceId:'b'}]
+  assert.deepEqual(augmentRecords(repeated, '学生').slice(0,2), repeated)
+})
+
 test('下载授权必须属于当前用户和当前发布版本', () => {
   const version = { id: 'v1', status: '已发布' }
   const requests = [{ user: '数据使用者', versionId: 'v1', status: '已通过' }]

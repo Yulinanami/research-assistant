@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1390" viewBox="0 0 1440 1390">
+  <title>数据加工菜单与流水线的三个视觉方案</title>
+  <desc>方案 A 是侧栏与顶部流程，方案 B 是顶部导航与纵向步骤，方案 C 是资料树、任务区和运行记录三栏。解析均位于语料接入，模型使用与评测均位于右上角设置。</desc>
+  <style>
+    text{font-family:'Microsoft YaHei','Noto Sans CJK SC',sans-serif;fill:#24394a;font-size:17px}
+    .title{font-size:30px;font-weight:700}.heading{font-size:24px;font-weight:700}.small{font-size:15px;fill:#637b8a}.white{fill:white}.bold{font-weight:700}.blue{fill:#376add}
+    .shell{fill:white;stroke:#dce5ed}.card{fill:#f6f9fd;stroke:#dce5ed}.active{fill:#e9f0ff;stroke:#abc3fa}.line{stroke:#dce5ed}.button{fill:#376add}.sidebar{fill:#f0f5fa}
+  </style>
+  <rect width="1440" height="1390" fill="#f1f5f8"/>
+  <text x="40" y="55" class="title">数据加工 · 菜单与流程视觉方案</text>
+  <text x="40" y="88" class="small">评审草图 · 2026-10-22 · 六阶段流程，解析归语料接入，中间成果留在项目内，模型入口归设置</text>
+  <g transform="translate(40 125)">
+    <text y="25" class="heading">A · 全局侧栏 + 顶部流程 + 纵向卡片（推荐）</text>
+    <text x="870" y="25" class="small">原型难度：低　适合按步骤建设数据</text>
+    <rect y="47" width="1360" height="310" rx="14" class="shell"/>
+    <path d="M14 47H210V357H14Q0 357 0 343V61Q0 47 14 47" class="sidebar"/>
+    <text x="24" y="83" class="bold">研数 · 工作空间</text>
+    <text x="24" y="126">工作台</text><rect x="14" y="143" width="182" height="39" rx="7" class="active"/><text x="24" y="169" class="blue bold">数据加工</text>
+    <text x="24" y="211">加工任务</text><text x="24" y="253">我的数据集</text><text x="24" y="312">数据治理与共享</text>
+    <text x="240" y="83" class="bold">土壤科研项目　/　目标数据集 DS-0001</text><text x="1160" y="83">设置　用户</text>
+    <line x1="210" y1="101" x2="1360" y2="101" class="line"/>
+    <text x="240" y="137" class="small">需求规划　 →　语料接入与解析　 →　预处理　 →　清洗　 →</text>
+    <rect x="854" y="111" width="116" height="36" rx="7" class="active"/><text x="872" y="136" class="blue">数据标注</text><text x="994" y="137" class="small">→　项目成果</text>
+    <rect x="240" y="167" width="1090" height="66" rx="9" class="card"/><text x="260" y="194" class="bold">01　选择建设方式与输入</text><text x="260" y="219" class="small">知识片段　/　问答生成　/　文本分类　/　图片分类　/　区域框选　/　人工复核</text>
+    <rect x="240" y="247" width="1090" height="85" rx="9" class="card"/><text x="260" y="276" class="bold">02　问答生成配置</text><text x="260" y="307">目标受众　→　任务模板　→　提示词　→　模型摘要</text><rect x="1155" y="273" width="150" height="38" rx="7" class="button"/><text x="1177" y="299" class="white">执行并看成果</text>
+    <text y="388" class="small">保留当前外壳，接入、清洗和标注使用一致卡片；侧栏只负责业务区域，顶部流程负责项目内步骤。</text>
+  </g>
+  <g transform="translate(40 545)">
+    <text y="25" class="heading">B · 顶部业务导航 + 纵向步骤</text><text x="870" y="25" class="small">原型难度：中　适合需要更多纵向说明的流程</text>
+    <rect y="47" width="1360" height="310" rx="14" class="shell"/>
+    <text x="24" y="83" class="bold">研数</text><text x="128" y="83">工作台</text><text x="240" y="83" class="blue bold">数据加工</text><text x="370" y="83">加工任务</text><text x="500" y="83">我的数据集</text><text x="655" y="83">数据治理与共享</text><text x="1160" y="83">设置　用户</text>
+    <line x1="0" y1="101" x2="1360" y2="101" class="line"/>
+    <rect x="16" y="115" width="252" height="222" rx="9" class="sidebar"/>
+    <text x="34" y="144" class="bold">当前项目 · 土壤科研</text><text x="34" y="181" class="small">✓　需求规划</text><text x="34" y="214" class="small">✓　语料接入与解析</text><text x="34" y="247" class="small">✓　预处理与清洗</text><text x="34" y="280" class="blue bold">●　数据标注</text><text x="34" y="315" class="small">○　项目成果</text>
+    <text x="298" y="146" class="bold">数据标注 / 图片整体分类</text><text x="1040" y="146" class="small">DS-0001　共 48 张</text>
+    <rect x="298" y="165" width="615" height="169" rx="9" class="card"/><text x="528" y="249" class="small">当前图片预览</text>
+    <rect x="932" y="165" width="399" height="169" rx="9" class="card"/><text x="954" y="198" class="bold">标签模板 · 科研图片类型</text><text x="954" y="236">● 科研图表　○ 田间照片</text><text x="954" y="265" class="small">标注含义：判断整张图片的内容类别</text><rect x="1100" y="283" width="204" height="35" rx="7" class="button"/><text x="1130" y="307" class="white">保存至项目成果</text>
+    <text y="388" class="small">业务区域与项目步骤分开；左侧为当前项目的步骤导航，解析仍只在语料接入阶段出现。</text>
+  </g>
+  <g transform="translate(40 965)">
+    <text y="25" class="heading">C · 资料树 + 中央任务区 + 运行记录</text><text x="870" y="25" class="small">原型难度：高　适合大屏、批量任务与反复比对</text>
+    <rect y="47" width="1360" height="310" rx="14" class="shell"/>
+    <text x="24" y="83" class="bold">研数　/　数据加工　/　土壤科研项目</text><text x="1160" y="83">设置　用户</text><line x1="0" y1="101" x2="1360" y2="101" class="line"/>
+    <rect x="16" y="115" width="240" height="222" rx="9" class="sidebar"/><text x="34" y="145" class="bold">项目资料</text><text x="34" y="184">▾ 原始资料（12）</text><text x="48" y="217" class="small">试验报告.pdf</text><text x="48" y="247" class="small">采样记录.csv</text><text x="34" y="284">▾ 中间成果（8）</text><text x="48" y="315" class="blue">清洗批次 · 已完成</text>
+    <text x="284" y="145" class="small">需求 → 接入解析 → 预处理 → 清洗 → 标注 → 成果</text>
+    <rect x="284" y="165" width="670" height="169" rx="9" class="card"/><text x="306" y="197" class="bold">使用本次清洗结果生成问答</text><text x="306" y="237">目标受众：农业科研人员</text><text x="306" y="270">任务模板：忠实原文　　输入：23 条</text><rect x="768" y="283" width="162" height="35" rx="7" class="button"/><text x="789" y="307" class="white">创建标注任务</text>
+    <rect x="973" y="115" width="359" height="222" rx="9" class="card"/><text x="995" y="146" class="bold">运行记录与下一步</text><text x="995" y="185" class="small">清洗完成 · 保留 23 / 过滤 2</text><text x="995" y="222" class="small">输出来源、规则、配置快照</text><text x="995" y="267" class="blue">查看项目内成果 →</text><text x="995" y="309" class="small">人工复核后可主动提交审核</text>
+    <text y="388" class="small">三栏同时展示来源、当前操作和任务状态；窄屏需将资料树与运行记录收进抽屉，实施成本最高。</text>
+  </g>
+</svg>

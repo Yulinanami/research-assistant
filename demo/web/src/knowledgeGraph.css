@@ -1,0 +1,18 @@
+.knowledge-graph { margin-top: 20px; }
+.graph-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.graph-toolbar .tags { margin-top: 0; }
+.graph-toolbar > .el-input { max-width: 320px; }
+.graph-canvas { width: 100%; max-height: 520px; border: 1px solid #dfe8f6; border-radius: 12px; background: radial-gradient(ellipse at center,#ffffff,#f3f7ff); }
+.graph-node { cursor: pointer; outline: none; }
+.graph-node circle { fill: #e6f0ff; stroke: #4d86e7; stroke-width: 2; transition: fill .15s; }
+.graph-node:hover circle, .graph-node:focus circle { fill: #adcdfd; stroke-width: 3; }
+.graph-node text { fill: #355b8f; font-size: 13px; text-anchor: middle; pointer-events: none; }
+.graph-edge { cursor: pointer; outline: none; }
+.graph-edge line { stroke: #a6bfdf; stroke-width: 2; }
+.graph-edge:hover line, .graph-edge:focus line { stroke: #2164d9; stroke-width: 4; }
+.graph-edge text { fill: #8196b2; font-size: 10px; text-anchor: middle; paint-order: stroke; stroke: white; stroke-width: 3px; }
+.graph-evidence { padding: 20px; margin: 15px 0; background: #f5f9ff; border: 1px solid #dfebfc; border-radius: 9px; }
+.graph-evidence h4 { margin: 0 0 16px; }
+.graph-evidence small { color: #8093ad; overflow-wrap: anywhere; }
+.graph-evidence pre { max-height: 240px; overflow: auto; white-space: pre-wrap; line-height: 1.9; margin: 8px 0 20px; }
+.knowledge-graph .el-table { margin-top: 12px; }
