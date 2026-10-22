@@ -1,5 +1,6 @@
 import { isDatasetVersion } from './domain.js'
 import { preparationInputs } from './workflow.js'
+import { validateConversations } from './imports.js'
 
 export function defaultSettings() {
   return {
@@ -65,10 +66,28 @@ export function generationInputs(type, sources, versions, datasetId) {
 }
 
 export function classificationInputs(kind, sources, versions, datasetId, context) {
-  const output = context?.datasetId === datasetId ? versions.find(v => v.datasetId === datasetId && context.inputIds.includes(v.id)) : null
-  const compatibleOutput = output && (kind === 'image' ? output.type === '图片清洗' || output.records.some(r=>r.image?.startsWith('data:image/')) : output.type === '文本清洗' || output.records.some(r=>typeof r.content === 'string'))
-  if (compatibleOutput) return output.records.filter(r => r.status !== '过滤' && (kind === 'image' ? r.image?.startsWith('data:image/') : r.content)).map((record,index) => ({id:`${output.id}-${index}`,sourceId:record.sourceId || output.id,title:record.title || output.type,content:record.content || '',image:record.image || '',labels:[]}))
-  return preparationInputs(sources,versions,datasetId).filter(input => input.ready && input.kind === kind).map(input => ({id:input.id,sourceId:input.id,title:input.name,content:kind === 'text' ? input.content : '',image:kind === 'image' ? input.content : '',labels:[]}))
+  const local = versions.filter(version => version.datasetId === datasetId)
+  const matches = record => kind === 'image' ? record.image?.startsWith('data:image/') : typeof record.content === 'string' && record.content.trim()
+  const compatible = output => output.type === (kind === 'image' ? '图片清洗' : '文本清洗') || output.records.some(matches)
+  const explicit = context?.datasetId === datasetId
+    ? local.filter(version => context.inputIds?.includes(version.id) && compatible(version)) : []
+  const outputs = explicit.length ? explicit : local.filter(version => version.type === '条目导入' && compatible(version))
+  const records = outputs.flatMap(output => output.records.flatMap((record, index) => {
+    if (record.status === '过滤' || !matches(record)) return []
+    return [{ ...JSON.parse(JSON.stringify(record)), id: `${output.id}-${index}`, inputVersionId: output.id,
+      sourceRecordId: record.id || '', sourceRecordIndex: index,
+      sourceId: record.sourceId || output.sourceId || output.id,
+      title: record.title || output.type, content: record.content || '', image: record.image || '', labels: [...(record.labels || [])] }]
+  }))
+  if (explicit.length) return records
+  const raw = preparationInputs(sources,versions,datasetId).filter(input => input.ready && input.kind === kind
+    && (context?.datasetId !== datasetId || !context.inputIds?.length || context.inputIds.includes(input.id) || context.inputIds.includes(input.originId)))
+    .map(input => ({id:input.id,sourceId:input.id,title:input.name,content:kind === 'text' ? input.content : '',image:kind === 'image' ? input.content : '',labels:[]}))
+  // An incompatible handoff may still be used to start another kind of task.
+  if (!records.length && !raw.length && context?.datasetId === datasetId && !explicit.length) {
+    return classificationInputs(kind, sources, versions, datasetId)
+  }
+  return [...records, ...raw]
 }
 
 export function libraryDatasets(data, mode, user, canView) {
@@ -82,15 +101,25 @@ export function libraryDatasets(data, mode, user, canView) {
   }).filter(item => mode === 'square' ? item.versions.length : mode === 'mydatasets' ? item.owned : mode === 'audit' ? item.pending.length : item.owned || item.versions.length)
 }
 
+export function governanceVersions(versions, mode, canView) {
+  const statuses = mode === 'release' ? ['已通过', '已发布'] : ['待审核', '已通过', '已退回', '已发布']
+  return versions.filter(version => isDatasetVersion(version) && statuses.includes(version.status) && canView(version.datasetId))
+}
+
 export function exportDatasetRecords(records, schema) {
+  if (!['原始结构', 'Alpaca', 'ShareGPT'].includes(schema)) throw new Error('不支持的导出记录结构')
   const ready = records.filter(r => r.status !== '过滤').map(r => ({ ...r, answer: r.correctedAnswer?.trim() || r.answer }))
   if (schema === 'Alpaca') {
-    if (ready.some(r => !r.question?.trim() || !r.answer?.trim())) throw new Error('Alpaca 导出需要每条记录都有问题和答案')
+    if (ready.some(r => r.conversations)) throw new Error('多轮对话请导出 ShareGPT，转换为单轮 Alpaca 需要明确映射')
+    if (ready.some(r => typeof r.question !== 'string' || !r.question.trim() || typeof r.answer !== 'string' || !r.answer.trim())) throw new Error('Alpaca 导出需要每条记录都有问题和答案')
     return ready.map(r => ({ instruction: r.question, input: r.reference || '', output: r.answer }))
   }
   if (schema === 'ShareGPT') {
-    if (ready.some(r => !r.question?.trim() || !r.answer?.trim())) throw new Error('ShareGPT 导出需要每条记录都有问题和答案')
-    return ready.map(r => ({ conversations: [{ from: 'human', value: r.question }, { from: 'gpt', value: r.answer }] }))
+    return ready.map(r => {
+      if (r.conversations) { validateConversations(r.conversations); return { conversations: JSON.parse(JSON.stringify(r.conversations)) } }
+      if (typeof r.question !== 'string' || !r.question.trim() || typeof r.answer !== 'string' || !r.answer.trim()) throw new Error('ShareGPT 导出需要每条记录都有问题和答案')
+      return { conversations: [{ from: 'human', value: r.question }, { from: 'gpt', value: r.answer }] }
+    })
   }
   return ready
 }

@@ -27,7 +27,17 @@ export function augmentRecords(records, audience) {
   return [...originals, ...enhanced]
 }
 
+export function submitVersionReview(version, submitter = '') {
+  if (!isDatasetVersion(version)) throw new Error('中间加工成果保留在项目内，请先建设数据集版本')
+  if (!['草稿', '已退回'].includes(version.status)) throw new Error('只有草稿或已退回版本可以提交审核')
+  if (!version.records?.length || !version.records.some(record => record.status !== '过滤')) throw new Error('没有可提交的数据')
+  version.status = '待审核'
+  version.submitted = now()
+  version.submittedBy = submitter
+}
+
 export function reviewVersion(version, approved, note) {
+  if (!isDatasetVersion(version)) throw new Error('中间加工成果不进入正式审核')
   if (version.status !== '待审核') throw new Error('请先提交审核')
   version.status = approved ? '已通过' : '已退回'
   version.reviewNote = note

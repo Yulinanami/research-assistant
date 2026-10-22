@@ -23,16 +23,16 @@ const internalPages = [
   { id:'processing', title:'数据预处理', subtitle:'确认上游资料及解析结果，准备后续清洗输入' },
   { id:'cleaning', title:'数据清洗', subtitle:'选择常用清洗配置，试运行后批量处理资料' },
   { id:'generation', title:'数据标注', subtitle:'按任务模板生成、分类或人工标注数据' },
-  { id:'review', title:'质量审核', subtitle:'在项目内检查、修订并审核数据集成果' },
-  { id:'versions', title:'项目成果', subtitle:'查看中间成果与数据集版本，继续加工或发布成果' },
+  { id:'versions', title:'项目成果', subtitle:'预览、自检与导出项目成果，完成后提交治理审核' },
   { id:'settings', title:'设置', subtitle:'统一维护解析、模型、清洗与标注模板' },
 ]
 const pages = [...navigation.flatMap(group => group.items), ...internalPages]
 const resolve = id => resolveSessionPage(id, Boolean(auth.session), pages.map(item => item.id))
 const page = ref(resolve(location.hash.slice(1) || 'home'))
 const collapsed = ref(false)
-const projectPages = ['planning','sources','processing','cleaning','generation','review','versions']
+const projectPages = ['planning','sources','processing','cleaning','generation','versions']
 const inProject = computed(() => projectPages.includes(page.value))
+const inGovernance = computed(() => navigation.find(group => group.title === '数据治理与共享').items.some(item => item.id === page.value))
 const project = computed(() => visibleProjects().find(item => item.id === state.activeProjectId))
 const datasets = computed(projectDatasets)
 const current = computed(() => pages.find(item => item.id === page.value) || pages[0])
@@ -72,26 +72,27 @@ onMounted(async () => { await initialize(); ensureContext(); syncRoute(); window
       <div class="sidebar-footer"><span class="online-dot"></span><span v-if="!collapsed">本地演示空间</span><el-button text @click="collapsed = !collapsed"><el-icon><component :is="collapsed ? 'Expand' : 'Fold'" /></el-icon></el-button></div>
     </aside>
     <div class="main-shell">
-      <header class="topbar"><el-breadcrumb separator="/"><el-breadcrumb-item>{{ inProject ? '数据加工' : '工作空间' }}</el-breadcrumb-item><el-breadcrumb-item v-if="inProject && project">{{ project.name }}</el-breadcrumb-item><el-breadcrumb-item>{{ current.title }}</el-breadcrumb-item></el-breadcrumb>
+      <header class="topbar"><el-breadcrumb separator="/"><el-breadcrumb-item>{{ inProject ? '数据加工' : inGovernance ? '数据治理与共享' : '工作空间' }}</el-breadcrumb-item><el-breadcrumb-item v-if="inProject && project">{{ project.name }}</el-breadcrumb-item><el-breadcrumb-item>{{ current.title }}</el-breadcrumb-item></el-breadcrumb>
         <div class="topbar-actions"><span class="demo-chip"><i></i>演示模式</span><el-button text :type="page === 'settings' ? 'primary' : ''" @click="navigate('settings')"><el-icon><SetUp /></el-icon><span>设置</span></el-button><el-popover placement="bottom-end" :width="340" trigger="click"><template #reference><el-button text aria-label="消息"><el-badge :value="state.notices.length" :max="9"><el-icon><Bell /></el-icon></el-badge></el-button></template><div class="notice" v-for="(notice,i) in state.notices.slice(0,8)" :key="i">{{ notice }}</div></el-popover><span class="top-divider"></span><div class="avatar">{{ state.role.slice(0,1) }}</div><el-dropdown @command="userCommand"><button class="user-menu"><b>{{ state.role }}</b><small>切换演示身份<el-icon><ArrowDown /></el-icon></small></button><template #dropdown><el-dropdown-menu><el-dropdown-item v-for="role in ['管理员','加工人员','审核人员','数据使用者']" :key="role" :command="role">{{ role }}</el-dropdown-item><el-dropdown-item divided command="reset">重置演示数据</el-dropdown-item><el-dropdown-item divided command="logout">退出登录</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
       </header>
       <main v-if="storage.ready" class="page-content">
         <el-alert v-if="storage.error" :title="storage.error" type="warning" :closable="false" />
-        <div class="page-heading"><div><div class="eyebrow">{{ inProject || page === 'projects' ? 'DATA PROCESSING' : page === 'settings' ? 'WORKSPACE SETTINGS' : 'RESEARCH WORKSPACE' }}</div><h1>{{ current.title }}</h1><p>{{ current.subtitle }}</p></div><span class="save-state"><i></i>{{ storage.saving ? '正在保存…' : '已保存到本地' }}</span></div>
+        <div class="page-heading"><div><div class="eyebrow">{{ inProject || page === 'projects' ? 'DATA PROCESSING' : page === 'settings' ? 'WORKSPACE SETTINGS' : inGovernance ? 'DATA GOVERNANCE' : 'RESEARCH WORKSPACE' }}</div><h1>{{ current.title }}</h1><p>{{ current.subtitle }}</p></div><span class="save-state"><i></i>{{ storage.saving ? '正在保存…' : '已保存到本地' }}</span></div>
         <template v-if="inProject && project">
           <section class="project-context"><div><span class="icon-tile blue"><el-icon><FolderOpened /></el-icon></span><div><small>当前项目</small><b>{{ project.name }}</b></div></div><div class="project-context-actions"><el-select :model-value="state.activeProjectId" aria-label="切换项目" @change="enterSelectedProject"><el-option v-for="item in visibleProjects()" :key="item.id" :value="item.id" :label="item.name" /></el-select><el-select v-if="datasets.length" v-model="state.activeDataset" aria-label="当前目标数据集"><el-option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id" :label="dataset.name" /></el-select><el-button text @click="navigate('projects')">全部项目</el-button></div></section>
           <WorkflowSteps :page="page" @navigate="navigate" />
           <el-empty v-if="!datasets.length && page !== 'planning'" description="当前项目尚无数据集，请先定义建设目标"><el-button type="primary" @click="navigate('planning')">规划第一个数据集</el-button></el-empty>
-          <PreparationView v-else-if="page === 'processing'" @navigate="navigate" />
-          <CleaningView v-else-if="page === 'cleaning'" @navigate="navigate" />
+          <PreparationView v-else-if="page === 'processing'" :key="state.activeDataset" @navigate="navigate" />
+          <CleaningView v-else-if="page === 'cleaning'" :key="state.activeDataset" @navigate="navigate" />
           <AnnotationWorkbench v-else-if="page === 'generation'" :key="state.activeDataset" @navigate="navigate" />
-          <ResultsView v-else-if="['review','versions'].includes(page)" :key="page + state.activeDataset" :page="page" @navigate="navigate" />
+          <ResultsView v-else-if="page === 'versions'" :key="page + state.activeDataset" :page="page" @navigate="navigate" />
           <ProcessView v-else :key="page + state.activeDataset" :page="page" @navigate="navigate" />
         </template>
         <ProjectsView v-else-if="page === 'projects' || inProject" @navigate="navigate" />
         <ProjectTasks v-else-if="page === 'project-tasks'" @navigate="navigate" />
         <LandingView v-else-if="page === 'workbench'" :page="page" @navigate="navigate" />
-        <DatasetLibrary v-else-if="['mydatasets','catalog','square','audit','requests'].includes(page)" :mode="page" @navigate="navigate" />
+        <DatasetLibrary v-else-if="['mydatasets','catalog','square','requests'].includes(page)" :mode="page" @navigate="navigate" />
+        <ResultsView v-else-if="['audit','release'].includes(page)" :key="page" :page="page" @navigate="navigate" />
         <SettingsView v-else-if="page === 'settings'" @navigate="navigate" />
         <ResultsView v-else-if="page === 'services'" page="services" @navigate="navigate" />
         <GovernanceView v-else :key="page" :page="page" />

@@ -3,12 +3,13 @@ import assert from 'node:assert/strict'
 import { readDemoSession, resolveSessionPage, publicRecommendations } from '../src/auth.js'
 
 test('未登录只能进入外部首页，登录后默认工作台并保留可访问的业务链接', () => {
-  const pages=['workbench','projects','generation','settings']
+  const pages=['workbench','projects','generation','settings','audit']
   for (const requested of ['', 'home', 'projects', 'settings', 'unknown']) assert.equal(resolveSessionPage(requested,false,pages),'home')
   for (const requested of ['', 'home', 'unknown']) assert.equal(resolveSessionPage(requested,true,pages),'workbench')
   assert.equal(resolveSessionPage('projects',true,pages),'projects')
   assert.equal(resolveSessionPage('annotation',true,pages),'generation')
   assert.equal(resolveSessionPage('models',true,pages),'settings')
+  assert.equal(resolveSessionPage('review',true,pages),'audit')
 })
 
 test('登录状态缺失、损坏、存储不可用或身份无效时回到未登录状态', () => {

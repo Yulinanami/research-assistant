@@ -10,6 +10,8 @@ const status = ref('')
 const detail = ref(null)
 const sourceId = ref('')
 const projects = computed(visibleProjects)
+const taskStatuses = computed(() => [...new Set(['执行中', '标注中', '已提交', '已完成', '失败',
+  ...state.tasks.filter(task => allowed('view', task.datasetId)).map(task => task.status)])])
 const project = computed(() => projects.value.find(item => item.id === projectId.value))
 const datasets = computed(() => state.datasets.filter(item => item.projectId === project.value?.id && allowed('view', item.id)))
 const tasks = computed(() => state.tasks.filter(task => allowed('view', task.datasetId)
@@ -66,7 +68,7 @@ function executeFlow() {
         <el-option v-for="item in projects" :key="item.id" :value="item.id" :label="item.name" />
       </el-select>
       <el-select v-model="status" clearable placeholder="全部状态" aria-label="筛选任务状态">
-        <el-option v-for="item in ['执行中', '已完成', '失败']" :key="item" :value="item" :label="item" />
+        <el-option v-for="item in taskStatuses" :key="item" :value="item" :label="item" />
       </el-select>
       <el-input v-model="search" clearable placeholder="搜索任务名称" aria-label="搜索任务名称" class="task-search" />
     </div>

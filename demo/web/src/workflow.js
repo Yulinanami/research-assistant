@@ -1,4 +1,4 @@
-import { cleanText, cleanImages } from './domain.js'
+import { cleanText, cleanImages, splitText } from './domain.js'
 
 export const workflowSteps = [
   { page: 'planning', title: '需求规划' },
@@ -6,8 +6,7 @@ export const workflowSteps = [
   { page: 'processing', title: '预处理' },
   { page: 'cleaning', title: '清洗' },
   { page: 'generation', title: '数据标注' },
-  { page: 'review', title: '质量审核' },
-  { page: 'versions', title: '成果发布' },
+  { page: 'versions', title: '项目成果' },
 ]
 
 export function parserType(source) {
@@ -20,6 +19,11 @@ export function parserType(source) {
 // Resolve the actual upstream output rather than relying on a file's status label.
 export function preparationInputs(sources, versions, datasetId) {
   return sources.filter(s => s.datasetId === datasetId).map(source => {
+    const imported = versions.find(version => version.datasetId === datasetId && version.type === '条目导入'
+      && (version.id === source.importedVersionId || version.sourceId === source.id))
+    if (imported) return { id: imported.id, originId: source.id, name: source.name, kind: 'structured',
+      content: JSON.stringify(imported.records, null, 2), ready: imported.records.length > 0, parser: '',
+      stage: '结构化条目', reason: '已保留逐条结构，可直接进入标注或项目成果' }
     const parser = parserType(source)
     const parsedResults = versions.filter(v => v.datasetId === datasetId && v.sourceId === source.id && v.type === parser && v.records.some(r => r.content?.trim()))
     const parsed = parser && (parsedResults.find(v => v.id === source.parsedVersionId) || parsedResults[0])
@@ -31,6 +35,20 @@ export function preparationInputs(sources, versions, datasetId) {
       stage: parser ? parsed ? '已解析' : '待解析' : ready ? '可直接处理' : '内容不可用',
       reason: ready ? '' : parser ? '请先在语料管理中完成解析' : '请检查文件格式和内容',
     }
+  })
+}
+
+export function chunkRecords(input, config = {}) {
+  const records = input.records || [{ content: input.content, source: input.name, originId: input.id }]
+  return records.flatMap((record, index) => {
+    if (record.status === '过滤' || typeof record.content !== 'string' || !record.content.trim()) return []
+    return splitText(record.content, config).map((content, chunkIndex) => ({
+      title: record.title || input.name || input.type, content,
+      source: record.source || record.title || input.name || input.type,
+      sourceId: record.sourceId || input.sourceId || input.id,
+      originId: record.originId || record.sourceId || input.sourceId || input.id,
+      inputId: input.id, sourceRecordIndex: index, chunkIndex,
+    }))
   })
 }
 

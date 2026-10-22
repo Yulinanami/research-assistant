@@ -1,9 +1,10 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { state, selectedVersions, selectedSources, addVersion, requireAction, notify, runTask, allowed, taskName } from '../store'
-import { sampleImage, qaSamples } from '../data'
-import { uid, now, isDatasetVersion } from '../domain'
+import { state, selectedVersions, selectedSources, addVersion, requireAction, notify, runTask, allowed, taskName, submitForReview } from '../store'
+import { sampleImage } from '../data'
+import { uid, isDatasetVersion } from '../domain'
+import { reviewInput, recordAnnotationTask } from '../annotation'
 const emit = defineEmits(['navigate'])
 const props = defineProps({initialTab:{type:String,default:'问答标注'}})
 const tab = ref(props.initialTab)
@@ -24,10 +25,34 @@ const current = computed(() => records.value[index.value])
 const images = computed(() => selectedSources().filter(s => /^(PNG|JPG|JPEG|WEBP|SVG)$/.test(s.type)))
 const image = computed(() => images.value.find(s => s.id === imageId.value)?.content || sampleImage)
 const task = ref(null)
-watch(versionId, id => { const v = state.versions.find(v => v.id === id); records.value = JSON.parse(JSON.stringify(v?.records || [])); index.value = 0; draftId.value = '' })
-watch(() => state.activeDataset, () => { versionId.value = versions.value[0]?.id || ''; imageId.value = images.value[0]?.id || ''; boxes.value = []; task.value = null }, { immediate: true })
-watch(imageId, () => { boxes.value = []; draftId.value = ''; const v = selectedVersions().find(v => v.type === '图像标注' && v.sourceId === imageId.value); if (v) boxes.value = JSON.parse(JSON.stringify(v.records[0]?.boxes || [])) })
-watch(tab, () => { draftId.value = ''; task.value = null })
+const target = state.ui.annotationTarget?.datasetId === state.activeDataset ? { ...state.ui.annotationTarget } : null
+delete state.ui.annotationTarget
+function loadQuestions() {
+  if (tab.value !== '问答标注') return
+  const version = versions.value.find(item => item.id === versionId.value)
+  records.value = JSON.parse(JSON.stringify(version?.records || []))
+  index.value = target && version?.id === target.versionId ? Math.min(target.index || 0, Math.max(0, records.value.length - 1)) : 0
+  draftId.value = version?.status === '草稿' && isDatasetVersion(version) ? version.id : ''
+  task.value = null
+}
+function loadBoxes() {
+  if (tab.value !== '图像标注') return
+  const candidates = selectedVersions().filter(version => version.type === '图像标注' && version.sourceId === imageId.value)
+  const version = candidates.find(item => item.id === draftId.value && item.status === '草稿')
+    || candidates.find(item => item.id === (target?.versionId || state.focusVersion))
+    || candidates.find(item => item.status === '草稿') || candidates[0]
+  boxes.value = JSON.parse(JSON.stringify(version?.records[0]?.boxes || []))
+  draftId.value = version?.status === '草稿' && isDatasetVersion(version) ? version.id : ''
+  drawing.value = null; task.value = null
+}
+watch([versionId, tab], loadQuestions, { immediate: true })
+watch([imageId, tab], loadBoxes, { immediate: true })
+watch(() => state.activeDataset, () => {
+  const context = state.ui.pipeline?.datasetId === state.activeDataset ? state.ui.pipeline : null
+  versionId.value = reviewInput(versions.value, state.activeDataset, target?.versionId || state.focusVersion, context?.inputIds)?.id || ''
+  const focused = selectedVersions().find(version => version.id === (target?.versionId || state.focusVersion) && version.type === '图像标注')
+  imageId.value = images.value.find(item => item.id === focused?.sourceId)?.id || images.value[0]?.id || ''
+}, { immediate: true })
 function save(submit = false) {
   if (!requireAction('edit')) return
   if (tab.value === '问答标注' && !records.value.length) return ElMessage.warning('请选择问答成果')
@@ -37,13 +62,15 @@ function save(submit = false) {
   const output = tab.value === '问答标注' ? records.value : [{ image: imageId.value || '演示图片', boxes: boxes.value }]
   const input = state.versions.find(v => v.id === versionId.value)
   const base = input?.type === '自动标注' ? state.versions.find(v => v.id === input.sourceId) : input
-  let version = state.versions.find(v => v.id === draftId.value) || (tab.value === '问答标注' && base?.status === '草稿' ? base : null)
-  if (!version || version.status !== '草稿') version = addVersion(state.activeDataset, output, tab.value, tab.value === '问答标注' ? base?.id || versionId.value : imageId.value)
+  let version = selectedVersions().find(v => v.id === draftId.value) || (tab.value === '问答标注' && base?.status === '草稿' && isDatasetVersion(base) ? base : null)
+  if (!version || version.status !== '草稿') version = addVersion(state.activeDataset, output, tab.value, tab.value === '问答标注' ? base?.id || versionId.value : imageId.value, 'dataset')
   else version.records = JSON.parse(JSON.stringify(output))
   draftId.value = version.id
-  if (!task.value) { task.value = { id: uid('task'), projectId:state.activeProjectId, datasetId: state.activeDataset, name: taskName(tab.value), type: tab.value, status: '标注中', progress: 0, created: now(), versionId: version.id, logs: ['人工标注'] }; state.tasks.unshift(task.value); task.value = state.tasks[0] }
-  task.value.progress = tab.value === '图像标注' ? 100 : Math.round(records.value.filter(r => r.label).length / records.value.length * 100)
-  if (submit) { version.status = '待审核'; state.focusVersion = version.id; task.value.status = '已提交'; notify('标注已提交审核'); emit('navigate', 'review') } else notify('标注草稿已保存')
+  state.focusVersion = version.id
+  const progress = tab.value === '图像标注' ? 100 : Math.round(records.value.filter(r => r.label).length / records.value.length * 100)
+  task.value = recordAnnotationTask(state.tasks, version, tab.value, progress, taskName(tab.value))
+  if (tab.value === '问答标注') versionId.value = version.id
+  if (submit) { if (submitForReview(version)) { state.focusVersion = version.id; task.value.status = '已提交'; emit('navigate', 'audit') } } else notify('标注草稿已保存')
 }
 function automatic() {
   if (!versionId.value || !model.value) return ElMessage.warning('请选择成果版本与模型')

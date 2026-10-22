@@ -1,10 +1,11 @@
 import { reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { initialData, qaSamples, researchText, imageCleaningSamples } from './data'
-import { uid, now, createVersion, canDownload, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords } from './domain'
-import { cleanBatch, resultContent, parserType } from './workflow'
+import { uid, now, createVersion, canDownload, submitVersionReview, reviewVersion, publishVersion, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords } from './domain'
+import { cleanBatch, resultContent, parserType, chunkRecords } from './workflow'
 import { migrateWorkspace } from './workspace'
 import { auth } from './auth'
+import { parseEntries } from './imports'
 
 export const state = reactive(migrateWorkspace(initialData()))
 export const storage = reactive({ ready: false, error: '', saving: false })
@@ -102,7 +103,8 @@ export function addVersion(datasetId, records, type, sourceId, kind) {
 
 export function runTask(config) {
   if (!requireAction('edit', config.datasetId || state.activeDataset)) return
-  let task = { id: uid('task'), datasetId: state.activeDataset, ...JSON.parse(JSON.stringify(config)), created: now(), status: '执行中', progress: 10, logs: ['任务已创建（模拟）', '已读取输入和配置'] }
+  let task = { ...JSON.parse(JSON.stringify(config)), id: uid('task'), datasetId: config.datasetId || state.activeDataset, created: now(), status: '执行中', progress: 10, logs: ['任务已创建（模拟）', '已读取输入和配置'] }
+  delete task.versionId
   task.projectId = state.datasets.find(d => d.id === task.datasetId)?.projectId || ''
   task.name ||= taskName(task.type, task.datasetId)
   state.tasks.unshift(task)
@@ -120,6 +122,9 @@ export function runTask(config) {
         if (task.fail) { task.status = '失败'; if (task.type.includes('解析') && inputSource) inputSource.status = '解析失败'; task.logs.push('模拟失败：输入文档不可读取。取消模拟失败后可重试。'); finishFlowTask(task); return }
         const previousVersion = state.versions.find(v => v.id === task.sourceId && v.datasetId === task.datasetId)
         const source = state.sources.find(s => s.id === task.sourceId && s.datasetId === task.datasetId) || (previousVersion ? { name: isDatasetVersion(previousVersion) ? `V${previousVersion.number} · ${previousVersion.type}` : previousVersion.type, content: resultContent(previousVersion.records) } : null)
+        if (!task.config?.pipeline && !source && task.type !== '图片清洗') {
+          task.status = '失败'; task.logs.push('输入资料不存在或不属于本数据集，请重新选择输入'); finishFlowTask(task); return
+        }
         let records
         if (task.config?.pipeline) {
           try {
@@ -129,18 +134,19 @@ export function runTask(config) {
           } catch (error) { task.status = '失败'; task.logs.push(error.message); finishFlowTask(task); return }
         } else if (task.type === '知识片段') {
           if (!source?.content?.trim() || source.content.startsWith('data:')) { task.status = '失败'; task.logs.push('输入没有可用文本，请检查上一步成果。'); finishFlowTask(task); return }
-          const text = source.content
-          records = splitText(text, task.config || {}).map(content => ({ title: source?.name || '演示文档', content, source: source?.name }))
+          records = chunkRecords(previousVersion || { ...source, id: task.sourceId }, task.config || {})
+          if (!records.length) { task.status = '失败'; task.logs.push('输入没有可用于切片的正文条目'); finishFlowTask(task); return }
         } else if (['问答生成', '问答增强', '图片问答'].includes(task.type)) {
           records = structuredClone(qaSamples)
           if (task.type === '问答增强') {
-            const previous = state.versions.find(v => v.id === task.sourceId)
-            records = augmentRecords(previous?.records || records, task.config?.audience)
+            if (!previousVersion?.records.some(record => record.question)) { task.status = '失败'; task.logs.push('问答增强需要本数据集的问答成果'); finishFlowTask(task); return }
+            records = augmentRecords(previousVersion.records, task.config?.audience)
           }
         } else if (task.type === '图片描述') {
           records = [{ content: '图中比较A组与B组的土壤含水量，分别为20%和25%，B组高5个百分点。', source: source?.name }]
         } else if (task.type === '文本清洗') {
-          let text = source?.content || researchText
+          if (!source?.content?.trim() || source.content.startsWith('data:')) { task.status = '失败'; task.logs.push('输入没有可清洗正文'); finishFlowTask(task); return }
+          let text = source.content
           const rules = task.config?.rules || []
           text = cleanText(text, rules)
           records = [{ title: source?.name, content: text, source: source?.name, before: source?.content, retained: text.split('\n').filter(Boolean).length }]
@@ -156,9 +162,10 @@ export function runTask(config) {
           task.logs.push(`输入${records.length}张，保留${kept}张，过滤${records.length - kept}张；原始图片未修改。`)
           task.logs.push('质量与尺寸为演示信息；格式与尺寸标准化仅展示配置结果，未转换图片文件。')
         } else if (task.type === '自动标注') {
-          const original = state.versions.find(v => v.id === task.sourceId)
-          records = JSON.parse(JSON.stringify(original?.records || qaSamples)).map((r, i) => ({ ...r, suggestion: i === 2 ? '需修改' : '可用', label: '', rating: 0 }))
+          if (!previousVersion?.records.some(record => record.question)) { task.status = '失败'; task.logs.push('自动标注需要本数据集的问答成果'); finishFlowTask(task); return }
+          records = JSON.parse(JSON.stringify(previousVersion.records)).map((r, i) => ({ ...r, suggestion: i === 2 ? '需修改' : '可用', label: '', rating: 0 }))
         } else {
+          if (!inputSource || parserType(inputSource) !== task.type) { task.status = '失败'; task.logs.push('解析类型与输入资料不匹配'); finishFlowTask(task); return }
           records = [{ title: source?.name, content: researchText, source: source?.name, format: task.config?.format || 'Markdown', table: 'A组 | 20%\nB组 | 25%', formula: 'w = m_water / m_dry × 100%', image: '土壤含水量对比图' }]
         }
         const version = addVersion(task.datasetId, records, task.type, task.sourceId)
@@ -229,16 +236,15 @@ export async function importFile(file, datasetId = state.activeDataset) {
   if (/^(TXT|CSV|JSON|JSONL|MD|HTML|XML|YAML)$/.test(type)) content = await file.text()
   if (file.type.startsWith('image/')) content = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file) })
   if (!requireAction('edit', datasetId)) throw new Error('没有导入权限')
+  const records = ['JSON', 'JSONL'].includes(type) ? parseEntries(content, type.toLowerCase()) : null
   const source = { id: uid('src'), datasetId, projectId: state.datasets.find(d => d.id === datasetId)?.projectId || '', name: file.name, type, content, size: file.size, status: '待处理', created: now(), hasFile: true }
   try { await transact('readwrite', store => store.put(file, source.id)) }
   catch (error) { source.hasFile = false; storage.error = `文件保存失败：${error.message}` }
   state.sources.unshift(source)
-  if (type === 'JSON' || type === 'JSONL') {
-    try {
-      const parsed = type === 'JSONL' ? content.trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line)) : JSON.parse(content)
-      const list = Array.isArray(parsed) ? parsed : parsed.records
-      if (Array.isArray(list) && list.length) addVersion(datasetId, list.map(r => ({ question: r.instruction || r.question || '', answer: r.output || r.answer || '', reference: r.input || r.reference || '', ...r })), '条目导入', source.id)
-    } catch { ElMessage.warning('文件已保存，但内容不是有效JSON条目；可在语料详情查看。') }
+  if (records) {
+    const version = addVersion(datasetId, records, '条目导入', source.id)
+    source.importedVersionId = version.id
+    source.status = '已接入'
   }
   return source
 }
@@ -263,6 +269,11 @@ export function downloadVersion(version, format = 'json') {
   const content = format === 'md' ? records.map(r => r.question ? `## ${r.question}\n\n${r.answer}\n\n> 来源：${r.reference || '未提供'}` : `## ${r.title || '内容'}\n\n${r.content || JSON.stringify(r)}`).join('\n\n') : JSON.stringify(records, null, 2)
   saveDownload(content, `${datasetName(version.datasetId)}-v${version.number}.${format}`, format === 'md' ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8')
 }
+export function submitForReview(version) {
+  if (!requireAction('edit', version.datasetId)) return false
+  try { submitVersionReview(version, state.role); notify('成果已提交至数据治理与共享的质量审核'); return true }
+  catch (error) { ElMessage.warning(error.message); return false }
+}
 export function review(version, approved, note) {
   if (!requireAction('review', version.datasetId)) return
   reviewVersion(version, approved, note); notify(approved ? '审核已通过，可发布成果' : '已退回修改')
@@ -270,7 +281,7 @@ export function review(version, approved, note) {
 export function publish(version, details) {
   if (!requireAction('review', version.datasetId)) return false
   publishVersion(version, details, state.versions, state.role)
-  notify(`${version.release.tag}已发布，可在数据目录查看`)
+  notify(`${version.release.tag}已发布，可在数据广场查看`)
   return true
 }
 export async function resetDemo() {
