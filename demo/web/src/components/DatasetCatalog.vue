@@ -4,9 +4,12 @@ import { ElMessage } from 'element-plus'
 import { state, submitUsageRequest, checkGovernance, allowed, notify, downloadVersion } from '../store'
 import { buildDatasetTrace, contentFieldsFor, qualityFingerprint, isDatasetVersion, canDownload, uid, now, isDatasetOwner, isVersionAuthorized } from '../domain'
 import FormDialog from './GovernanceFormDialog.vue'
+import { publicCatalog } from '../auth'
 const executionText = value => ['待后端落实','待后端保障'].includes(value) ? '—' : value==='后端保障'?'系统策略':value
-const props = defineProps({ page: String })
-const emit = defineEmits(['navigate'])
+const props = defineProps({ page: String, guest: Boolean, focus: Object })
+const emit = defineEmits(['navigate','login-required'])
+const catalogData = computed(() => props.guest ? publicCatalog(state) : state)
+const mayView = dataset => props.guest || allowed('view',dataset.id)
 const search = ref('')
 const descriptionOverflow = ref({})
 const descriptionObservers = new WeakMap()
@@ -37,23 +40,23 @@ const dialog = ref(false)
 const requestVersion = ref(null)
 const formOpen = ref(false)
 const requestFields = [{ key: 'applicant', label: '申请人', required: true }, { key: 'department', label: '部门', required: true }, { key: 'reason', label: '使用理由', required: true, type: 'textarea' }]
-const owned = d => isDatasetOwner(d, state.role)
-const versionApproved = version => isVersionAuthorized(version, state.requests, state.role, state.datasets.find(d => d.id === version.datasetId))
+const owned = d => !props.guest && isDatasetOwner(d, state.role)
+const versionApproved = version => !props.guest && isVersionAuthorized(version, state.requests, state.role, state.datasets.find(d => d.id === version.datasetId))
 const authorizedVersions = id => state.versions.filter(v => v.datasetId === id && isDatasetVersion(v) && v.status === '已发布' && versionApproved(v))
 const approved = id => authorizedVersions(id).length > 0
-const versionsFor = id => state.versions.filter(v => v.datasetId === id && isDatasetVersion(v) && (props.page === 'plaza' || !owned(state.datasets.find(d=>d.id===id)) ? v.status === '已发布' : true)).sort((a,b)=>b.number-a.number)
+const versionsFor = id => catalogData.value.versions.filter(v => v.datasetId === id && isDatasetVersion(v) && (props.page === 'plaza' || !owned(state.datasets.find(d=>d.id===id)) ? v.status === '已发布' : true)).sort((a,b)=>b.number-a.number)
 const latestReleaseFor = dataset => versionsFor(dataset.id).find(version => version.status === '已发布')
 const cardVersionFor = dataset => latestReleaseFor(dataset) || versionsFor(dataset.id)[0]
 const downloadsFor = dataset => latestReleaseFor(dataset) ? (dataset.downloads || 0) : 0
 const publisherFor = dataset => dataset.publisherId || versionsFor(dataset.id).find(version => version.status === '已发布')?.release?.publisher || dataset.owner || '管理员'
-const plazaDatasets = computed(() => state.datasets.filter(dataset => allowed('view',dataset.id) && dataset.storageState!=='已归档' && versionsFor(dataset.id).length))
+const plazaDatasets = computed(() => catalogData.value.datasets.filter(dataset => mayView(dataset) && dataset.storageState!=='已归档' && versionsFor(dataset.id).length))
 const datasetTypes = computed(() => [...new Set(plazaDatasets.value.map(dataset => dataset.type))])
 const datasetIndustries = computed(() => [...new Set(plazaDatasets.value.map(dataset => dataset.industry || dataset.project).filter(Boolean))])
 const publishedTimeFor = dataset => { const version = latestReleaseFor(dataset); return version?.release?.publishedAt || version?.published || version?.created || '' }
 const updatedTime = dataset => Date.parse(publishedTimeFor(dataset).replaceAll('/','-').replace(' ','T')) || 0
 const publishedLabelFor = dataset => { const date = publishedTimeFor(dataset).match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/); return date ? `发布于：${date[1]}年${Number(date[2])}月${Number(date[3])}日` : '—' }
 const datasets = computed(() => {
-  const rows = state.datasets.filter(dataset => allowed('view',dataset.id) && `${dataset.name} ${dataset.code || ''}`.toLowerCase().includes(search.value.trim().toLowerCase()) && (props.page === 'plaza' ? dataset.storageState!=='已归档' && versionsFor(dataset.id).length : owned(dataset) || approved(dataset.id)) && (props.page === 'plaza' || scope.value === '全部' || (scope.value === '我的数据集' ? owned(dataset) : approved(dataset.id))))
+  const rows = catalogData.value.datasets.filter(dataset => mayView(dataset) && `${dataset.name} ${dataset.code || ''}`.toLowerCase().includes(search.value.trim().toLowerCase()) && (props.page === 'plaza' ? dataset.storageState!=='已归档' && versionsFor(dataset.id).length : owned(dataset) || approved(dataset.id)) && (props.page === 'plaza' || scope.value === '全部' || (scope.value === '我的数据集' ? owned(dataset) : approved(dataset.id))))
   if (props.page !== 'plaza') return rows
   return rows.filter(dataset => (!selectedType.value || dataset.type === selectedType.value) && (!selectedIndustry.value || (dataset.industry || dataset.project) === selectedIndustry.value)).sort((a,b) => sortBy.value === 'downloads' ? (b.downloads || 0) - (a.downloads || 0) || updatedTime(b) - updatedTime(a) : updatedTime(b) - updatedTime(a) || (b.downloads || 0) - (a.downloads || 0))
 })
@@ -79,6 +82,13 @@ const usageEvents=computed(()=>state.usageEvents.filter(item=>item.versionId===v
 const reportCurrent=computed(()=>detailReport.value && detailReport.value.fingerprint===qualityFingerprint(state,version.value))
 const downloadable = computed(() => version.value && allowed('download',version.value.datasetId) && canDownload(version.value,state.requests,state.role,selected.value))
 function open(dataset) { selected.value=dataset; versionId.value=versionsFor(dataset.id)[0]?.id || ''; dialog.value=true }
+watch(() => props.focus, target => {
+  const dataset = target && datasets.value.find(item => item.id === target.datasetId)
+  if (!dataset) return
+  open(dataset)
+  if (versionsFor(dataset.id).some(item => item.id === target.versionId)) versionId.value = target.versionId
+}, {immediate:true})
+function loginForVersion() { emit('login-required',{datasetId:selected.value.id,versionId:versionId.value}) }
 function editDataset() { state.activeProjectId=selected.value.projectId; state.activeDataset=selected.value.id; state.focusVersion=versionId.value; dialog.value=false; emit('navigate','versions') }
 function apply() {
   if (owned(selected.value)) return
@@ -126,7 +136,23 @@ function submit(data) { if (submitUsageRequest(requestVersion.value,data)) formO
 
   <el-pagination v-if="datasets.length" v-model:current-page="plazaPage" :page-size="10" :pager-count="5" :total="datasets.length" layout="total, prev, pager, next" :aria-label="page==='catalog'?'数据目录分页':'数据广场分页'" class="plaza-pagination" />
   <section v-if="!datasets.length" class="panel"><el-empty :description="page==='catalog'?'暂无自己的或已获准使用的数据集':(search || selectedType || selectedIndustry ? '没有匹配的数据集' : '暂无已发布的共享数据集')"><el-button v-if="page==='catalog'" type="primary" @click="$emit('navigate','plaza')"><el-icon><Grid /></el-icon>去数据广场</el-button></el-empty></section>
-  <el-drawer v-model="dialog" :title="selected?.name" size="min(880px, 96vw)"><template v-if="selected"><div class="detail-badges"><el-tag>{{ selected.type }}</el-tag><el-tag type="info">{{ selected.project }}</el-tag><el-tag v-if="approved(selected.id)" type="success"><el-icon><CircleCheck /></el-icon>已获授权 · {{ authorizedVersions(selected.id).length }} 个版本</el-tag></div><el-descriptions :column="1" border><el-descriptions-item label="数据集编号">{{ selected.code }}</el-descriptions-item><el-descriptions-item label="数据来源">{{ selected.source || '—' }}</el-descriptions-item><el-descriptions-item label="所属领域">{{ selected.industry }}</el-descriptions-item><el-descriptions-item label="数据等级">{{ selected.level }}</el-descriptions-item><el-descriptions-item label="数据责任人">{{ selected.steward }}</el-descriptions-item><el-descriptions-item label="内容标准">{{ state.fieldTemplates.find(item=>item.id===selected.fieldTemplateId)?.name || '未绑定' }}</el-descriptions-item></el-descriptions><div class="dataset-downloads dataset-detail-downloads"><el-icon><Download /></el-icon>下载量 {{ downloadsFor(selected).toLocaleString() }}</div><p class="dataset-introduction">{{ descriptionFor(selected) }}</p><div class="tags"><el-tag v-for="tag in selected.tags" :key="tag">{{ tag }}</el-tag></div><el-divider /><el-collapse class="dataset-history">
+  <el-drawer v-if="guest" v-model="dialog" :title="selected?.name" size="min(880px, 96vw)" class="public-dataset-detail">
+    <template v-if="selected && version">
+      <div class="detail-badges"><el-tag>{{ selected.type }}</el-tag><el-tag v-if="selected.industry" type="info">{{ selected.industry }}</el-tag></div>
+      <p class="dataset-introduction">{{ descriptionFor(selected) }}</p>
+      <div class="tags"><el-tag v-for="tag in selected.tags" :key="tag">{{ tag }}</el-tag></div>
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="数据集编号">{{ selected.code || selected.id }}</el-descriptions-item>
+        <el-descriptions-item label="发布者">{{ publisherFor(selected) }}</el-descriptions-item>
+        <el-descriptions-item label="版本"><el-select v-model="versionId" aria-label="查看发布版本"><el-option v-for="item in versions" :key="item.id" :value="item.id" :label="item.release?.tag || `V${item.number}`" /></el-select></el-descriptions-item>
+        <el-descriptions-item label="数据量">{{ version.totalRecords.toLocaleString() }} {{ selected.type==='图片'?'张':'条' }}</el-descriptions-item>
+        <el-descriptions-item label="下载量">{{ downloadsFor(selected).toLocaleString() }}</el-descriptions-item>
+        <el-descriptions-item label="发布日期">{{ version.release?.publishedAt || version.published || version.created || '—' }}</el-descriptions-item>
+      </el-descriptions>
+      <div class="dialog-actions"><el-button @click="loginForVersion"><el-icon><DocumentChecked /></el-icon>登录后申请使用</el-button><el-button type="primary" @click="loginForVersion"><el-icon><Download /></el-icon>登录后下载</el-button></div>
+    </template>
+  </el-drawer>
+  <el-drawer v-else v-model="dialog" :title="selected?.name" size="min(880px, 96vw)"><template v-if="selected"><div class="detail-badges"><el-tag>{{ selected.type }}</el-tag><el-tag type="info">{{ selected.project }}</el-tag><el-tag v-if="approved(selected.id)" type="success"><el-icon><CircleCheck /></el-icon>已获授权 · {{ authorizedVersions(selected.id).length }} 个版本</el-tag></div><el-descriptions :column="1" border><el-descriptions-item label="数据集编号">{{ selected.code }}</el-descriptions-item><el-descriptions-item label="数据来源">{{ selected.source || '—' }}</el-descriptions-item><el-descriptions-item label="所属领域">{{ selected.industry }}</el-descriptions-item><el-descriptions-item label="数据等级">{{ selected.level }}</el-descriptions-item><el-descriptions-item label="数据责任人">{{ selected.steward }}</el-descriptions-item><el-descriptions-item label="内容标准">{{ state.fieldTemplates.find(item=>item.id===selected.fieldTemplateId)?.name || '未绑定' }}</el-descriptions-item></el-descriptions><div class="dataset-downloads dataset-detail-downloads"><el-icon><Download /></el-icon>下载量 {{ downloadsFor(selected).toLocaleString() }}</div><p class="dataset-introduction">{{ descriptionFor(selected) }}</p><div class="tags"><el-tag v-for="tag in selected.tags" :key="tag">{{ tag }}</el-tag></div><el-divider /><el-collapse class="dataset-history">
     <el-collapse-item name="trace" title="来源与流转"><el-timeline v-if="trace.length"><el-timeline-item v-for="item in trace" :key="item.id" :timestamp="item.time" placement="top"><h4><el-icon><component :is="item.icon" /></el-icon>{{ item.name.replace(/ · 待后端保障$/, '') }}</h4><p>{{ item.detail }}</p><span v-if="item.actor">{{ item.actor }}</span></el-timeline-item></el-timeline><el-empty v-else description="此版本尚无可追溯记录" /></el-collapse-item>
     <el-collapse-item name="evidence" title="发布依据"><template v-if="version?.release?.evidence"><div class="detail-badges"><span>{{ version.release.evidence.operator }} · {{ version.release.evidence.created }}</span></div><el-descriptions :column="2" border><el-descriptions-item label="数据集编号">{{ version.release.evidence.metadata.code }}</el-descriptions-item><el-descriptions-item label="数据等级">{{ version.release.evidence.metadata.level }}</el-descriptions-item><el-descriptions-item label="来源">{{ version.release.evidence.metadata.source }}</el-descriptions-item><el-descriptions-item label="责任人">{{ version.release.evidence.metadata.steward }}</el-descriptions-item><el-descriptions-item label="内容标准">{{ version.release.evidence.contentTemplate?.name || '未绑定' }} r{{ version.release.evidence.contentTemplate?.revision || '—' }}</el-descriptions-item><el-descriptions-item label="质量报告">{{ state.qualityReports.find(report=>report.id===version.release.evidence.qualityReportId)?.created || '未记录' }}</el-descriptions-item></el-descriptions><el-table :data="version.release.evidence.standards"><el-table-column label="采用标准" prop="name" /><el-table-column label="修订" width="90"><template #default="{row}">r{{ row.revision }}</template></el-table-column><el-table-column label="执行方式"><template #default="{row}">{{ executionText(row.executionMode) }}</template></el-table-column><el-table-column label="确认依据" min-width="200"><template #default="{row}">{{ row.confirmation?row.confirmation.operator+' · '+row.confirmation.note:executionText(row.result) || '—' }}</template></el-table-column><el-table-column label="字段 / 环节"><template #default="{row}">{{ row.field || row.stages?.join('、') || '成果存储' }}</template></el-table-column></el-table></template><el-empty v-else :description="version?.release?'此历史发布未记录执行依据':'此版本尚未发布'" /></el-collapse-item>
     <el-collapse-item name="executions" title="规范执行记录"><el-table :data="versionExecutions" max-height="360"><el-table-column type="expand"><template #default="{row}"><el-table :data="row.standards || []"><el-table-column label="标准" prop="name" /><el-table-column label="修订" width="80"><template #default="{row}">r{{ row.revision }}</template></el-table-column><el-table-column label="执行方式"><template #default="{row}">{{ executionText(row.executionMode) }}</template></el-table-column><el-table-column label="结果" ><template #default="{row}">{{ executionText(row.result) }}</template></el-table-column></el-table></template></el-table-column><el-table-column label="环节" prop="stage" width="90" /><el-table-column label="对象"><template #default="{row}">{{ row.versionId?'V'+state.versions.find(item=>item.id===row.versionId)?.number:row.sourceName || '数据集级' }}</template></el-table-column><el-table-column label="操作人" prop="operator" width="100" /><el-table-column label="结果" width="110"><template #default="{row}">{{ executionText(row.status) }}</template></el-table-column><el-table-column label="时间" prop="created" width="180" /></el-table></el-collapse-item>

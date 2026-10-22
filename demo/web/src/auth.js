@@ -3,6 +3,7 @@ import { isDatasetVersion } from './domain.js'
 
 export const demoRoles = ['管理员', '加工人员', '审核人员', '数据使用者']
 const sessionKey = 'research-platform-demo-session'
+const returnKey = 'research-platform-login-return'
 function browserStorage() { try { return globalThis.sessionStorage } catch { return null } }
 
 export function readDemoSession(storage) {
@@ -24,15 +25,43 @@ export function logoutDemo() {
 }
 
 export function resolveSessionPage(requested, authenticated, pageIds) {
-  if (!authenticated) return 'home'
+  if (!authenticated) return ['square','login'].includes(requested) ? requested : 'home'
   const aliases = { annotation: 'generation', cleaning: 'processing', 'project-tasks': 'task-center', models: 'settings', statistics: 'workbench', review: 'audit' }
   const page = aliases[requested] || requested
   return pageIds.includes(page) ? page : 'workbench'
 }
 
+export function publicCatalog(data) {
+  const datasets = [], versions = []
+  for (const dataset of data.datasets) {
+    if (dataset.level !== '公开' || dataset.storageState === '已归档') continue
+    const published = data.versions.filter(version => version.datasetId === dataset.id && version.status === '已发布' && isDatasetVersion(version)).sort((a,b) => b.number - a.number)
+    if (!published.length) continue
+    datasets.push({ id:dataset.id, code:dataset.code, name:dataset.name, type:dataset.type, industry:dataset.industry, introduction:dataset.introduction || dataset.demand || dataset.scene || '', tags:[...(dataset.tags || [])], coverIcon:dataset.coverIcon, coverTone:dataset.coverTone, publisherId:dataset.publisherId || published[0].release?.publisher || dataset.owner, downloads:dataset.downloads || 0 })
+    for (const version of published) versions.push({ id:version.id, datasetId:dataset.id, number:version.number, kind:'dataset', status:'已发布', totalRecords:version.totalRecords ?? version.records?.length ?? 0, records:[], published:version.published, created:version.created, release:version.release ? {tag:version.release.tag,publishedAt:version.release.publishedAt,publisher:version.release.publisher} : undefined })
+  }
+  return {datasets,versions}
+}
+
 export function publicRecommendations(data) {
-  return data.datasets.filter(dataset => dataset.level === '公开').map(dataset => {
-    const latest = data.versions.filter(version => version.datasetId === dataset.id && version.status === '已发布' && isDatasetVersion(version)).sort((a,b) => b.number - a.number)[0]
-    return latest ? { id: dataset.id, name: dataset.name, type: dataset.type, tags: dataset.tags || [], summary: latest.release?.title || dataset.demand || '', count: latest.records.length } : null
-  }).filter(Boolean)
+  const catalog = publicCatalog(data)
+  return catalog.datasets.sort((a,b) => b.downloads - a.downloads).map(dataset => {
+    const latest = catalog.versions.find(version => version.datasetId === dataset.id)
+    return { id:dataset.id, name:dataset.name, type:dataset.type, tags:dataset.tags, summary:dataset.introduction, count:latest.totalRecords }
+  })
+}
+
+export function saveLoginReturn(target, storage = browserStorage()) {
+  try {
+    if (target?.datasetId && target?.versionId) storage?.setItem(returnKey, JSON.stringify({datasetId:target.datasetId,versionId:target.versionId}))
+    else storage?.removeItem(returnKey)
+  } catch {}
+}
+
+export function takeLoginReturn(storage = browserStorage()) {
+  try {
+    const target = JSON.parse(storage?.getItem(returnKey) || 'null')
+    storage?.removeItem(returnKey)
+    return typeof target?.datasetId === 'string' && typeof target?.versionId === 'string' ? target : null
+  } catch { return null }
 }
