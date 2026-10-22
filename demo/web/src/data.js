@@ -155,7 +155,7 @@ export function addIndustryDatasets(data) {
 }
 
 const sampleDownloadCounts = {
-  soil:1368, paper:720,
+  soil:1368, paper:0,
   'industry-health':8640, 'industry-finance':6230, 'industry-industry':5128,
   'industry-traffic':9842, 'industry-energy':3876, 'industry-retail':7235,
   'industry-education':4589, 'industry-agriculture':5692,
@@ -176,6 +176,12 @@ const sampleDatasetProfiles = {
   'industry-government': { publisherId:'wu_qing_113', introduction:'以办事材料清单、办理进度和服务窗口开放时段等咨询为内容，保存事项标题、咨询文本与分类标签。可用于体验政务服务意图识别、事项分流标签设计、人工分类审核和文本数据导出。样例不绑定真实地区或具体办事政策，适合展示数据分类流程，不能作为实际办理事项的材料要求。' },
 }
 function seedDatasetDownloads(data) {
+  const reverted = data.versions.findIndex(version => version.id === 'paper-v1' && version.release?.title === '科研文献结构化文本首版' && version.reviewNote === '已检查标题层级、正文顺序及表格内容。')
+  if (reverted >= 0) {
+    data.versions.splice(reverted, 1)
+    const paper = data.datasets.find(dataset => dataset.id === 'paper')
+    if (paper && !data.versions.some(version => version.datasetId === 'paper' && version.status === '已发布')) { paper.status = '草稿'; paper.introduction = sampleDatasetProfiles.paper.introduction }
+  }
   for (const dataset of data.datasets) {
     const profile = sampleDatasetProfiles[dataset.id]
     if (profile && !dataset.sampleProfileVersion) {
@@ -188,7 +194,20 @@ function seedDatasetDownloads(data) {
     seedSampleVersions(data, dataset)
     seedSampleReleaseTimes(data, dataset)
     seedSampleRecordCounts(data, dataset)
-    if (sampleDownloadCounts[dataset.id] && !dataset.downloadsSeeded) {
+    if (['industry-health', 'industry-environment'].includes(dataset.id) && !dataset.sampleApprovalSeeded) {
+      const version = data.versions.filter(v => v.datasetId === dataset.id && v.status === '已发布').sort((a,b) => b.number - a.number)[0]
+      if (version) {
+        const user = data.role || '管理员'
+        const request = data.requests.find(r => r.versionId === version.id && r.user === user)
+        const approval = { status:'已通过', note:'同意用于科研分析与数据建设。', approvedBy:dataset.publisherId || dataset.owner, approved:'2026/10/22 10:20:00' }
+        if (request) Object.assign(request, approval)
+        else data.requests.push({ id:`sample-approved-${dataset.id}`, datasetId:dataset.id, versionId:version.id, user, applicant:user, department:'科研数据组', reason:dataset.id === 'industry-health' ? '用于医疗服务文本分类研究。' : '用于流域水质指标分析。', created:'2026/10/21 16:35:00', ...approval })
+        dataset.sampleApprovalSeeded = true
+      }
+    }
+    const hasRelease = data.versions.some(version => version.datasetId === dataset.id && version.status === '已发布')
+    if (!hasRelease && Object.hasOwn(sampleDownloadCounts, dataset.id)) dataset.downloads = 0
+    if (hasRelease && sampleDownloadCounts[dataset.id] && !dataset.downloadsSeeded) {
       dataset.downloads = (dataset.downloads || 0) + sampleDownloadCounts[dataset.id]
       dataset.downloadsSeeded = true
     }
@@ -277,4 +296,30 @@ function seedSampleRecordCounts(data, dataset) {
     version.totalRecords = versions.length === 1 ? total : Math.round(total * (0.45 + 0.55 * index / (versions.length - 1)))
     if (version.release?.notes) version.release.notes = version.release.notes.replace(/包含\d+条(?:样例)?/, match => `包含${version.totalRecords}条${match.endsWith('样例') ? '数据' : ''}`)
   })
+}
+
+
+export function addGovernanceDemoDatasets(data) {
+  if (data.governanceDemoSeeded) return data
+  const created = '2026/10/22 09:20:00'
+  const samples = [
+    { id:'governance-demo-metadata', name:'科研文献主题分类（元数据规范演示）', industry:'科研教育', level:'待定', source:'研究组文献整理清单',
+      scene:'科研文献主题分类', demand:'整理文献摘要与主题，供科研检索使用。', tags:['科研文献','元数据规范'],
+      introduction:'整理科研文献的摘要、主题与来源，可用于主题分类和检索。此数据集尚未发布，数据等级暂为“待定”。在数据标准与字典中检查，或在项目中保存、发布时，会提示等级不在允许值内；编辑数据集，将等级改为“公开”或“内部”后可继续。',
+      records:[{title:'土壤含水量测定方法',content:'采用烘干法比较不同处理组土壤质量含水率。',reference:'研究组文献清单 · 001'},{title:'流域水质监测指标',content:'结合pH、溶解氧和氨氮指标描述监测站点的观测结果。',reference:'研究组文献清单 · 002'}] },
+    { id:'governance-demo-collection', name:'流域水质观测资料（采集规范演示）', industry:'生态环境', level:'内部', source:'',
+      scene:'流域监测资料接入', demand:'接入监测站观测记录，整理水质分析资料。', tags:['水质监测','采集规范'],
+      introduction:'包含上游和下游站点的水质观测内容，尚未填写数据来源。进入项目资料管理，上传普通TXT、JSON或CSV资料时，会被“资料接入检查”阻止；在项目数据集中补填来源，例如“流域监测站观测记录”，再接入即可继续。该数据集尚未发布。',
+      records:[{title:'上游站观测记录',content:'站点UP-01：pH为7.2，溶解氧8.1毫克/升，采样日期2026年9月12日。',reference:'待补充来源'},{title:'下游站观测记录',content:'站点DOWN-02：pH为7.0，溶解氧7.4毫克/升，采样日期2026年9月12日。',reference:'待补充来源'}] },
+  ]
+  for (const sample of samples) {
+    if (data.datasets.some(dataset=>dataset.id===sample.id)) continue
+    const {records,...dataset} = sample
+    const sourceId = `${sample.id}-source`
+    data.datasets.push({...dataset,owner:data.role || '管理员',type:'文本',project:'规范约束演示',quality:'来源可追溯，内容准确完整',format:'JSON、Markdown',scale:100,status:'草稿',downloads:0,created})
+    data.sources.push({id:sourceId,datasetId:sample.id,name:`${sample.scene}.json`,type:'JSON',content:JSON.stringify(records,null,2),status:'已接入',size:new TextEncoder().encode(JSON.stringify(records)).length,created})
+    data.versions.push({id:`${sample.id}-v1`,datasetId:sample.id,kind:'dataset',number:1,type:'条目导入',status:'已通过',records,sourceId,created,reviewNote:'内容审核通过，发布前需完成规范检查。'})
+  }
+  data.governanceDemoSeeded = true
+  return data
 }

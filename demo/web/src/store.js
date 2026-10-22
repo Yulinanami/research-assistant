@@ -1,9 +1,9 @@
 import { reactive, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { initialData, qaSamples, researchText, imageCleaningSamples, addIndustryDatasets } from './data'
-import { uid, now, createVersion, canDownload, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords, ensureProjects, ensureChatSessions } from './domain'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { initialData, qaSamples, researchText, imageCleaningSamples, addIndustryDatasets, addGovernanceDemoDatasets } from './data'
+import { ensureGovernance, validateGovernance, uid, now, createVersion, canDownload, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords, ensureProjects, ensureChatSessions } from './domain'
 
-export const state = reactive(ensureProjects(ensureChatSessions(initialData())))
+export const state = reactive(ensureGovernance(ensureProjects(addGovernanceDemoDatasets(ensureChatSessions(initialData())))))
 export const storage = reactive({ ready: false, error: '', saving: false })
 let db
 let pendingSaves = 0
@@ -30,9 +30,11 @@ export async function initialize() {
       request.onerror = () => reject(request.error)
     })
     const saved = await transact('readonly', store => store.get('state'))
-    if (saved) { Object.assign(state, saved); state.industrySeedsVersion = saved.industrySeedsVersion || 0; if (!Array.isArray(saved.chatSessions)) { state.chatSessions=undefined; state.activeChatId='' } }
+    if (saved) { Object.assign(state, saved); state.governanceDemoSeeded = saved.governanceDemoSeeded || false; state.governanceRulesSeeded = saved.governanceRulesSeeded || false; state.industrySeedsVersion = saved.industrySeedsVersion || 0; if (!Array.isArray(saved.chatSessions)) { state.chatSessions=undefined; state.activeChatId='' } }
     addIndustryDatasets(state)
+    addGovernanceDemoDatasets(state)
     ensureProjects(state)
+    ensureGovernance(state)
     ensureChatSessions(state)
     for (const task of state.tasks) {
       if (task.status === '执行中') { task.status = '失败'; task.logs.push('页面刷新中断了模拟任务，请重试。') }
@@ -46,6 +48,17 @@ export async function initialize() {
     catch (error) { storage.error = `本地保存失败：${error.message}` }
     finally { pendingSaves--; storage.saving = pendingSaves > 0 }
   }, { deep: true, flush: 'sync' })
+}
+
+export function checkGovernance(operation, context = {}) {
+  const dataset = context.dataset || state.datasets.find(d=>d.id === (context.datasetId || state.activeDataset))
+  const issues = validateGovernance(state, operation, {...context, dataset})
+  const labels = {import:'采集',save:'存储',publish:'发布',request:'使用申请',download:'下载'}
+  const blocked = issues.some(issue=>issue.action === '阻止操作')
+  state.governanceChecks.unshift({id:uid('check'),datasetId:dataset?.id,code:dataset?.code,name:dataset?.name,stage:labels[operation],created:now(),status:blocked?'未通过':issues.length?'提醒':'通过',issues})
+  state.governanceChecks.splice(30)
+  if (issues.length) ElMessageBox.alert(issues.map(issue=>`${issue.rule} · ${issue.field}：${issue.reason}`).join('\n'), blocked?'规范检查未通过':'规范检查提醒', {type:blocked?'error':'warning',confirmButtonText:'知道了'}).catch(()=>{})
+  return !blocked
 }
 
 export const datasetName = id => state.datasets.find(d => d.id === id)?.name || '未关联数据集'
@@ -69,7 +82,7 @@ export function addVersion(datasetId, records, type, sourceId, kind) {
 }
 
 export function runTask(config) {
-  if (!requireAction('edit', config.datasetId || state.activeDataset)) return
+  if (!requireAction('edit', config.datasetId || state.activeDataset) || !checkGovernance('save',{datasetId:config.datasetId || state.activeDataset})) return
   const input = state.sources.find(s => s.id === config.sourceId)
   const name = config.name || `${input?.name || datasetName(state.activeDataset)} · ${config.type} · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
   let task = { id: uid('task'), datasetId: state.activeDataset, ...config, name, created: now(), status: '执行中', progress: 10, logs: ['任务已创建（模拟）', '已读取输入和配置'] }
@@ -134,6 +147,7 @@ export function runTask(config) {
 }
 
 export async function importFile(file, datasetId = state.activeDataset) {
+  if (!requireAction('edit', datasetId) || !checkGovernance('import', {datasetId,file}) || !checkGovernance('save',{datasetId})) return null
   const type = file.name.split('.').pop().toUpperCase()
   let content = ''
   if (/^(TXT|CSV|JSON|JSONL|MD|HTML|XML|YAML)$/.test(type)) content = await file.text()
@@ -158,6 +172,7 @@ export function saveDownload(content, name, type = 'application/json;charset=utf
   setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 export async function downloadSource(source) {
+  if (!requireAction('download',source.datasetId) || !checkGovernance('download',{datasetId:source.datasetId})) return
   const file = source.hasFile ? await transact('readonly', store => store.get(source.id)) : null
   saveDownload(file || source.content, source.name, 'text/plain;charset=utf-8')
 }
@@ -168,6 +183,7 @@ export async function deleteSource(source) {
 }
 export function downloadVersion(version, format = 'json') {
   if (!requireAction('download', version.datasetId) || !canDownload(version, state.requests, state.role, state.datasets.find(d => d.id === version.datasetId))) return ElMessage.warning('请先申请当前版本并等待审批通过。')
+  if (!checkGovernance('download', {datasetId:version.datasetId})) return false
   const records = exportRecords(version.records)
   const content = format === 'md' ? records.map(r => r.question ? `## ${r.question}\n\n${r.answer}\n\n> 来源：${r.reference || '未提供'}` : `## ${r.title || '内容'}\n\n${r.content || JSON.stringify(r)}`).join('\n\n') : JSON.stringify(records, null, 2)
   saveDownload(content, `${datasetName(version.datasetId)}-v${version.number}.${format}`, format === 'md' ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8')
@@ -180,6 +196,7 @@ export function review(version, approved, note) {
 }
 export function publish(version, details) {
   if (!requireAction('review', version.datasetId)) return false
+  if (!checkGovernance('publish', {datasetId:version.datasetId})) return false
   publishVersion(version, details, state.versions, state.role)
   notify(`${version.release.tag}已发布，可在数据目录查看`)
   return true
@@ -188,5 +205,5 @@ export async function resetDemo() {
   generation++
   activeTimers.forEach(clearTimeout); activeTimers.clear()
   if (db) await transact('readwrite', store => store.clear())
-  Object.assign(state, ensureProjects(ensureChatSessions(initialData()))); notify('已恢复初始演示数据')
+  Object.assign(state, ensureGovernance(ensureProjects(addGovernanceDemoDatasets(ensureChatSessions(initialData()))))); notify('已恢复初始演示数据')
 }

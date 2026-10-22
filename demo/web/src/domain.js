@@ -150,3 +150,76 @@ export function selectChatSession(data, id) {
   data.conversations=session.messages
   return true
 }
+
+
+export function nextDatasetCode(datasets) {
+  const year = new Date().getFullYear()
+  const prefix = `DS-${year}-`
+  const largest = Math.max(0, ...datasets.filter(d => d.code?.startsWith(prefix)).map(d => Number(d.code.slice(prefix.length)) || 0))
+  return `${prefix}${String(largest + 1).padStart(6, '0')}`
+}
+
+export function ensureGovernance(data) {
+  data.governanceChecks ||= []
+  for (const dataset of data.datasets) {
+    dataset.code ||= nextDatasetCode(data.datasets)
+    dataset.industry ||= dataset.project || ''
+  }
+  const fields = [
+    ['code','数据集编号','文本',true,''], ['name','数据集名称','文本',true,''],
+    ['industry','所属领域','文本',true,''], ['type','数据类型','文本',true,'文本,图片,问答对,文本分类,结构化数据'],
+    ['source','数据来源','文本',true,''], ['level','数据等级','文本',true,'公开,内部'],
+  ]
+  if (!data.governanceRulesSeeded) {
+    for (const [field,name,dataType,required,allowedValues] of fields) data.standards.push({id:`metadata-${field}`,category:'元数据规范',field,name,dataType,required,allowedValues,min:0,max:field==='name'?100:500,enabled:true,scope:'全部类型'})
+    const keys = fields.map(row=>row[0])
+    data.standards.push(
+      {id:'policy-collection',category:'全流程标准',name:'资料接入检查',stages:['采集'],metadataFields:['source'],fileTypes:'PDF,DOC,DOCX,XLS,XLSX,TXT,CSV,JSON,JSONL,MD,HTML,XML,YAML,YML,PNG,JPG,JPEG,WEBP,SVG',maxMB:50,enabled:true,scope:'全部类型',action:'阻止操作'},
+      {id:'policy-storage',category:'全流程标准',name:'数据集保存检查',stages:['存储'],metadataFields:keys,enabled:true,scope:'全部类型',action:'阻止操作'},
+      {id:'policy-publish',category:'全流程标准',name:'数据集发布检查',stages:['共享'],metadataFields:keys,enabled:true,scope:'全部类型',action:'阻止操作'},
+      {id:'policy-security',category:'全流程标准',name:'共享安全检查',stages:['安全'],metadataFields:['level'],internalSharing:'申请授权',enabled:true,scope:'全部类型',action:'阻止操作'},
+    )
+    data.governanceRulesSeeded = true
+  }
+  return data
+}
+
+export function validateGovernance(data, operation, {dataset, file} = {}) {
+  if (!dataset) return [{rule:'数据集关联',field:'datasetId',reason:'找不到关联数据集',action:'阻止操作'}]
+  const stages = {import:['采集'],save:['存储'],publish:['共享','安全'],request:['安全'],download:['安全']}[operation] || []
+  const applicable = rule => rule.enabled !== false && (!rule.scope || rule.scope === '全部类型' || rule.scope === dataset.type)
+  const metadata = data.standards.filter(rule => rule.category === '元数据规范' && rule.field && applicable(rule))
+  const policies = data.standards.filter(rule => rule.category === '全流程标准' && applicable(rule) && rule.stages?.some(stage=>stages.includes(stage)))
+  const issues = []
+  const choices = text => String(text || '').split(/[,，\n]/).map(value=>value.trim()).filter(Boolean)
+  for (const policy of policies) {
+    const issue = (field,reason) => issues.push({rule:policy.name,field,reason,action:policy.action || '阻止操作'})
+    for (const rule of metadata.filter(rule=>policy.metadataFields?.includes(rule.field))) {
+      const value = dataset[rule.field]
+      const empty = value === undefined || value === null || (typeof value === 'string' && !value.trim())
+      if (empty) { if (rule.required) issue(rule.field,`${rule.name}为必填项`); continue }
+      const validType = rule.dataType === '数值' ? typeof value === 'number' && Number.isFinite(value) : rule.dataType === '布尔' ? typeof value === 'boolean' : rule.dataType === '日期' ? typeof value === 'string' && !Number.isNaN(Date.parse(value)) : typeof value === 'string'
+      if (!validType) { issue(rule.field,`${rule.name}必须是${rule.dataType}`); continue }
+      const allowed = choices(rule.allowedValues)
+      if (allowed.length && !allowed.includes(String(value))) issue(rule.field,`${rule.name}须为：${allowed.join('、')}`)
+      if (rule.dataType === '数值' || rule.dataType === '文本') {
+        const measure = rule.dataType === '数值' ? value : value.length
+        if (rule.min !== undefined && measure < rule.min || rule.max !== undefined && measure > rule.max) issue(rule.field,`${rule.name}${rule.dataType === '文本' ? '长度' : '数值'}须在${rule.min ?? 0}至${rule.max ?? '不限'}之间`)
+      }
+      if (rule.field === 'code') {
+        if (!/^DS-\d{4}-\d{6}$/.test(value)) issue('code','数据集编号格式应为DS-年份-六位序号')
+        if (data.datasets.some(other=>other.id!==dataset.id && other.code === value)) issue('code','数据集编号重复')
+        const original = data.datasets.find(other=>other.id===dataset.id)
+        if (original?.code && original.code !== value) issue('code','数据集编号创建后不能修改')
+      }
+    }
+    if (operation === 'import' && policy.stages.includes('采集') && file) {
+      const types = choices(policy.fileTypes).map(value=>value.toUpperCase().replace(/^\./,''))
+      const type = file.name.split('.').pop().toUpperCase()
+      if (types.length && !types.includes(type)) issue('fileType',`不允许导入${type}格式，允许：${types.join('、')}`)
+      if (policy.maxMB > 0 && file.size > policy.maxMB * 1024 * 1024) issue('fileSize',`单文件大小不能超过${policy.maxMB} MB`)
+    }
+    if (policy.stages.includes('安全') && dataset.level === '内部' && policy.internalSharing === '禁止共享' && (operation !== 'download' || !isDatasetOwner(dataset,data.role))) issue('level','内部数据禁止共享')
+  }
+  return issues
+}

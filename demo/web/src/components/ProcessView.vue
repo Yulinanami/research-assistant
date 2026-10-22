@@ -2,8 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Edit, Grid, Brush, Picture, Files, ChatDotRound, MagicStick, View, ChatLineSquare } from '@element-plus/icons-vue'
-import { state, selectedSources, selectedVersions, requireAction, notify, importFile, runTask, addVersion, allowed, downloadSource, deleteSource } from '../store'
-import { uid, now, isDatasetVersion } from '../domain'
+import { state, checkGovernance, selectedSources, selectedVersions, requireAction, notify, importFile, runTask, addVersion, allowed, downloadSource, deleteSource } from '../store'
+import { uid, now, isDatasetVersion, nextDatasetCode } from '../domain'
 import { researchText, tableSamples, qaSamples } from '../data'
 import FormDialog from './FormDialog.vue'
 import AnnotationPanel from './AnnotationPanel.vue'
@@ -69,16 +69,21 @@ const datasetFields = [
   { key: 'name', label: '数据集名称', required: true }, { key: 'type', label: '数据类型', type: 'select', options: ['文本', '图片', '问答对'], default: '问答对', required: true },
   { key: 'scene', label: '使用场景', required: true }, { key: 'demand', label: '业务需求', type: 'textarea', required: true }, { key: 'quality', label: '内容质量要求', type: 'textarea', default: '来源可追溯，内容准确完整' },
   { key: 'format', label: '格式质量要求', default: 'JSON、Markdown' }, { key: 'scale', label: '规划数据量（条）', type: 'number', default: 100 },
+  { key:'industry', label:'所属领域', required:true },
   { key: 'source', label: '数据来源' }, { key: 'level', label: '数据等级', type: 'select', options: ['公开', '内部'], default: '内部' },
   { key: 'status', label: '保存方式', type: 'select', options: ['草稿', '建设中'], default: '草稿', help: '选择“建设中”将提交规划并进入语料接入。' },
 ]
 function editDataset(row) {
   if (!requireAction('edit', row?.id)) return
-  openForm(row ? '编辑数据集规划' : '新建数据集', datasetFields, row, data => {
+  const metadataFields = state.standards.filter(rule=>rule.category==='元数据规范' && rule.field && rule.enabled!==false && !['code',...datasetFields.map(field=>field.key)].includes(rule.field))
+  const schema = [...datasetFields, ...metadataFields.map(rule=>({key:rule.field,label:rule.name,type:rule.dataType==='数值'?'number':rule.dataType==='布尔'?'switch':'text',required:rule.required, min:rule.min,max:rule.max}))]
+  openForm(row ? '编辑数据集规划' : '新建数据集', schema, row, data => {
     const project = state.projects.find(p=>p.id===state.activeProject)
     Object.assign(data, { projectId: project.id, project: project.name })
-    if (row) Object.assign(row, data)
-    else { row = { id: uid('dataset'), owner: state.role, ...data, tags: [data.type], created: now() }; state.datasets.unshift(row) }
+    const candidate = {...row,...data,id:row?.id || uid('dataset'),code:row?.code || nextDatasetCode(state.datasets)}
+    if (!checkGovernance('save',{dataset:candidate})) return false
+    if (row) Object.assign(row, candidate)
+    else { row = {owner:state.role,...candidate,tags:[data.type],created:now()}; state.datasets.unshift(row) }
     state.activeDataset = row.id; notify('数据集规划已保存')
     if (data.status === '建设中') emit('navigate', 'sources')
   })
@@ -89,11 +94,11 @@ async function removeSource(row) {
 }
 function editSource(row) {
   if (!requireAction('edit')) return
-  openForm('编辑语料', [{ key: 'name', label: '名称', required: true }, { key: 'content', label: '文本内容', type: 'textarea', rows: 8 }], row, data => { Object.assign(row, data); notify('语料已更新') })
+  openForm('编辑语料', [{ key: 'name', label: '名称', required: true }, { key: 'content', label: '文本内容', type: 'textarea', rows: 8 }], row, data => { if (!checkGovernance('save')) return false; Object.assign(row, data); notify('语料已更新') })
 }
 async function upload(event) {
   uploadBusy.value = true
-  try { for (const file of event.target.files) await importFile(file); notify('文件已接入并保存到本地'); importDialog.value = false }
+  try { let count = 0; for (const file of event.target.files) { if (await importFile(file)) count++ }; if (count) { notify(`已接入${count}份资料`); importDialog.value = false } }
   catch (e) { ElMessage.error(`导入失败：${e.message}`) }
   finally { uploadBusy.value = false; event.target.value = '' }
 }
@@ -102,6 +107,7 @@ function importEntries() {
     const data = JSON.parse(manualText.value)
     const records = Array.isArray(data) ? data : data.records
     if (!Array.isArray(records) || !records.length) throw new Error('请提供非空JSON数组')
+    if (!checkGovernance('import',{file:{name:'本地条目数据.json',size:new Blob([manualText.value]).size}}) || !checkGovernance('save')) return
     addVersion(state.activeDataset, records.map(r => ({ ...r, question: r.instruction || r.question || '', answer: r.output || r.answer || '', reference: r.input || r.reference || '' })), '条目导入', '')
     state.sources.unshift({ id: uid('src'), datasetId: state.activeDataset, name: '本地条目数据.json', type: 'JSON', status: '已接入', content: manualText.value, size: manualText.value.length, created: now() })
     importDialog.value = false; notify(`已导入${records.length}条数据`)
@@ -110,6 +116,7 @@ function importEntries() {
 function importDatabase() {
   if (!dbConfig.value.fields.length) return ElMessage.warning('请至少选择一个字段')
   const rows = tableSamples.map(row => Object.fromEntries(dbConfig.value.fields.map(key => [key, row[key]])))
+  if (!checkGovernance('import',{file:{name:`${dbConfig.value.table}.json`,size:new Blob([JSON.stringify(rows)]).size}}) || !checkGovernance('save')) return
   state.sources.unshift({ id: uid('src'), datasetId: state.activeDataset, name: `${dbConfig.value.table}.json`, type: 'JSON', status: '已接入', content: JSON.stringify(rows, null, 2), created: now(), size: 450 })
   notify('已导入4条模拟数据库记录'); importDialog.value = false
 }
@@ -284,5 +291,5 @@ async function evaluate() {
   <FormDialog v-model="dialog" :assist="dialogTitle === '新建数据集' ? { name: '土壤科研问答数据集', scene: '土壤环境科研问答', demand: '将试验报告与采样记录加工为可追溯的问答数据。', quality: '数值准确；保留参考材料；不编造产量结论', source: '试验报告与采样记录' } : undefined" :title="dialogTitle" :fields="fields" :initial="initial" @save="saveForm" />
   <input ref="fileInput" type="file" multiple hidden @change="upload" />
   <el-dialog v-model="importDialog" title="接入数据" width="760"><el-tabs v-model="importTab"><el-tab-pane v-for="name in ['文件上传', '条目导入', 'SDK导入', 'MySQL接入']" :key="name" :label="name" :name="name" /></el-tabs><template v-if="importTab === '文件上传'"><button class="upload-zone" :disabled="uploadBusy" @click="fileInput.click()"><el-icon><UploadFilled /></el-icon><h3>{{ uploadBusy ? '正在导入…' : '点击选择本地资料' }}</h3><p>支持文档、表格、图片和JSON条目数据</p></button></template><template v-if="importTab === '条目导入'"><p>粘贴JSON数组，支持question/answer或instruction/output字段。</p><el-input v-model="manualText" type="textarea" :rows="9" placeholder='[{"question":"采样深度是多少？","answer":"0—20厘米"}]' /><div class="dialog-actions"><el-button type="primary" @click="importEntries">导入条目</el-button></div></template><template v-if="importTab === 'SDK导入'"><pre>{{ sdkCode }}</pre><el-button @click="copy(sdkCode)">复制示例</el-button><el-button type="primary" @click="manualText = JSON.stringify([{ question: '采样深度是多少？', answer: '0—20厘米' }]); importEntries()">导入模拟SDK数据</el-button></template><template v-if="importTab === 'MySQL接入'"><el-form label-position="top" class="dialog-form"><div class="two-cols"><el-form-item label="Host与Port"><el-input v-model="dbConfig.host" /></el-form-item><el-form-item label="用户名"><el-input v-model="dbConfig.username" /></el-form-item></div><el-button @click="databaseConnected = Boolean(dbConfig.host && dbConfig.username)">测试连接（模拟）</el-button><el-tag v-if="databaseConnected" type="success">连接成功（模拟）</el-tag><template v-if="databaseConnected"><div class="two-cols"><el-form-item label="数据库"><el-input v-model="dbConfig.database" /></el-form-item><el-form-item label="数据表"><el-input v-model="dbConfig.table" /></el-form-item></div><el-form-item label="选择字段"><el-checkbox-group v-model="dbConfig.fields"><el-checkbox v-for="key in Object.keys(tableSamples[0])" :key="key" :value="key">{{ key }}</el-checkbox></el-checkbox-group></el-form-item><el-form-item label="筛选条件（演示配置）"><el-input v-model="dbConfig.condition" placeholder="例如 sampling_depth > 0" /></el-form-item><el-table :data="tableSamples"><el-table-column v-for="key in dbConfig.fields" :key="key" :label="key" :prop="key" /></el-table><el-button type="primary" @click="importDatabase">导入模拟记录</el-button></template></el-form></template></el-dialog>
-  <el-drawer :model-value="Boolean(detail)" :title="detail?.name || '详情'" size="620" @close="detail = null"><template v-if="detail"><el-descriptions :column="1" border><el-descriptions-item v-for="key in Object.keys(detail).filter(k => !['content','logs','config','id','datasetId','fail','hasFile','sourceId','versionId'].includes(k) && typeof detail[k] !== 'object')" :key="key" :label="({name:'名称',type:'类型',status:'状态',created:'创建时间',size:'大小',scene:'场景',quality:'质量要求',source:'来源',format:'格式',scale:'量级',project:'项目',level:'等级',demand:'需求',sourceId:'来源编号',versionId:'成果编号',progress:'进度'})[key] || key">{{ detail[key] }}</el-descriptions-item></el-descriptions><template v-if="detail.logs"><h3>执行日志</h3><pre>{{ detail.logs.join('\n') }}</pre><h3>任务配置</h3><pre>{{ JSON.stringify(detail.config || {}, null, 2) }}</pre><el-button v-if="detail.versionId" type="primary" @click="state.focusVersion = detail.versionId; detail = null; $emit('navigate', 'versions')">查看输出成果</el-button><el-button v-if="detail.status === '已完成'" type="primary" @click="continueTask(detail)"><el-icon><ArrowRight /></el-icon>{{ detail.type.includes('解析') ? '使用结果继续清洗' : detail.type.includes('清洗') ? '开始标注' : '检查与导出' }}</el-button></template><template v-else-if="detail.content"><h3>原始内容</h3><img v-if="detail.content.startsWith('data:image')" :src="detail.content" class="preview-image" /><pre v-else>{{ detail.content }}</pre></template><el-empty v-else-if="detail.hasFile" description="该格式使用模拟解析，可下载原文件查看" /><el-button v-if="detail.hasFile && allowed('edit')" @click="downloadSource(detail)">查看原始文件</el-button></template></el-drawer>
+  <el-drawer :model-value="Boolean(detail)" :title="detail?.name || '详情'" size="620" @close="detail = null"><template v-if="detail"><el-descriptions :column="1" border><el-descriptions-item v-for="key in Object.keys(detail).filter(k => !['content','logs','config','id','datasetId','fail','hasFile','sourceId','versionId'].includes(k) && typeof detail[k] !== 'object')" :key="key" :label="({code:'数据集编号',industry:'所属领域',name:'名称',type:'类型',status:'状态',created:'创建时间',size:'大小',scene:'场景',quality:'质量要求',source:'来源',format:'格式',scale:'量级',project:'项目',level:'等级',demand:'需求',sourceId:'来源编号',versionId:'成果编号',progress:'进度'})[key] || key">{{ detail[key] }}</el-descriptions-item></el-descriptions><template v-if="detail.logs"><h3>执行日志</h3><pre>{{ detail.logs.join('\n') }}</pre><h3>任务配置</h3><pre>{{ JSON.stringify(detail.config || {}, null, 2) }}</pre><el-button v-if="detail.versionId" type="primary" @click="state.focusVersion = detail.versionId; detail = null; $emit('navigate', 'versions')">查看输出成果</el-button><el-button v-if="detail.status === '已完成'" type="primary" @click="continueTask(detail)"><el-icon><ArrowRight /></el-icon>{{ detail.type.includes('解析') ? '使用结果继续清洗' : detail.type.includes('清洗') ? '开始标注' : '检查与导出' }}</el-button></template><template v-else-if="detail.content"><h3>原始内容</h3><img v-if="detail.content.startsWith('data:image')" :src="detail.content" class="preview-image" /><pre v-else>{{ detail.content }}</pre></template><el-empty v-else-if="detail.hasFile" description="该格式使用模拟解析，可下载原文件查看" /><el-button v-if="detail.hasFile && allowed('edit')" @click="downloadSource(detail)">查看原始文件</el-button></template></el-drawer>
 </template>

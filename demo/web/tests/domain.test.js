@@ -1,7 +1,7 @@
-import { initialData, addIndustryDatasets } from '../src/data.js'
+import { initialData, addIndustryDatasets, addGovernanceDemoDatasets } from '../src/data.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { canDownload, createVersion, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords, ensureProjects, isVersionAuthorized, ensureChatSessions, createChatSession, selectChatSession } from '../src/domain.js'
+import { ensureGovernance, validateGovernance, nextDatasetCode, canDownload, createVersion, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords, ensureProjects, isVersionAuthorized, ensureChatSessions, createChatSession, selectChatSession } from '../src/domain.js'
 
 test('下载授权必须属于当前用户和当前发布版本', () => {
   const version = { id: 'v1', status: '已发布' }
@@ -189,7 +189,7 @@ test('行业样例补充10个且不覆盖旧内容，推荐6个，重复加载�
     assert.ok(version.records.length > 0)
     assert.ok(data.sources.some(source=>source.id===version.sourceId))
   }
-  assert.equal(JSON.stringify({ datasets: data.datasets.slice(0,1), versions: data.versions.slice(0,1), sources: [], requests: data.requests }),original)
+  assert.equal(JSON.stringify({ datasets: data.datasets.slice(0,1), versions: data.versions.slice(0,1), sources: [], requests: data.requests.filter(request=>!request.id?.startsWith('sample-approved-')) }),original)
   const count = data.datasets.length
   addIndustryDatasets(data)
   assert.equal(data.datasets.length,count)
@@ -236,7 +236,8 @@ test('新建和切换会话保留各自草稿模型消息，空白聊天不重�
 test('内置样例预设下载基数，旧下载累计保留，重复加载不加倍且不修改自建数据', () => {
   const fresh = initialData()
   assert.equal(fresh.datasets.length, 12)
-  assert.ok(fresh.datasets.every(dataset => dataset.downloads > 0))
+  assert.ok(fresh.datasets.filter(dataset=>dataset.id!=='paper').every(dataset => dataset.downloads > 0))
+  assert.equal(fresh.datasets.find(dataset=>dataset.id==='paper').downloads,0)
   const sorted = fresh.datasets.filter(dataset => fresh.versions.some(version => version.datasetId === dataset.id && version.status === '已发布' && isDatasetVersion(version))).sort((a,b) => b.downloads - a.downloads).slice(0,6)
   assert.deepEqual(sorted.map(dataset => dataset.id), ['industry-traffic','industry-health','industry-retail','industry-finance','industry-agriculture','industry-industry'])
   const saved = { ...fresh, datasets: [{ id:'soil', downloads:5 }, { id:'my-dataset', downloads:9 }] }
@@ -331,4 +332,84 @@ test('样例总量各异且历史版本递增，总量与预览分开，用户�
   addIndustryDatasets(data)
   assert.equal(JSON.stringify(data.versions),before)
   assert.equal(userVersion.totalRecords,undefined)
+})
+
+
+test('治理规则：编号补齐稳定且新编号唯一，旧文字规范保留', () => {
+  const data = initialData()
+  ensureGovernance(data)
+  const before = data.datasets.map(d => d.code)
+  assert.equal(new Set(before).size, data.datasets.length)
+  assert.ok(before.every(code => /^DS-\d{4}-\d{6}$/.test(code)))
+  ensureGovernance(data)
+  assert.deepEqual(data.datasets.map(d => d.code), before)
+  assert.ok(!before.includes(nextDatasetCode(data.datasets)))
+  assert.ok(data.standards.some(s => s.id === 'std1'))
+})
+
+test('治理规则：元数据缺失阻止保存和发布，补齐可继续，停用不约束', () => {
+  const data = ensureGovernance(initialData())
+  const dataset = data.datasets.find(d => d.id === 'soil')
+  const rule = data.standards.find(r => r.field === 'source')
+  const draft = {...dataset, source:''}
+  assert.ok(validateGovernance(data, 'save', {dataset:draft}).some(i => i.field === 'source' && i.action === '阻止操作'))
+  assert.ok(validateGovernance(data, 'publish', {dataset:draft}).some(i => i.field === 'source'))
+  assert.equal(validateGovernance(data, 'publish', {dataset}).length,0)
+  rule.enabled = false
+  assert.equal(validateGovernance(data, 'publish', {dataset:draft}).length,0)
+})
+
+test('治理规则：采集限制格式和大小，规则可仅提示，禁用后不约束', () => {
+  const data = ensureGovernance(initialData())
+  const dataset = data.datasets[0]
+  const rule = data.standards.find(r => r.id === 'policy-collection')
+  rule.fileTypes = 'PDF,TXT'; rule.maxMB = 1
+  assert.equal(validateGovernance(data,'import',{dataset,file:{name:'sample.txt',size:10}}).length,0)
+  assert.ok(validateGovernance(data,'import',{dataset,file:{name:'sample.exe',size:10}}).length)
+  assert.ok(validateGovernance(data,'import',{dataset,file:{name:'sample.txt',size:1048577}}).length)
+  rule.action = '仅提示'
+  assert.ok(validateGovernance(data,'import',{dataset,file:{name:'sample.exe',size:10}}).every(i => i.action === '仅提示'))
+  rule.enabled = false
+  assert.equal(validateGovernance(data,'import',{dataset,file:{name:'sample.exe',size:10}}).length,0)
+})
+
+test('治理规则：重复编号、枚举及数值范围校验；内部共享不绕过指定版本授权', () => {
+  const data = ensureGovernance(initialData())
+  const dataset = data.datasets[0]
+  const copy = {...dataset,id:'new',code:dataset.code}
+  assert.ok(validateGovernance(data,'save',{dataset:copy}).some(i=>i.field==='code'))
+  assert.ok(validateGovernance(data,'save',{dataset:{...dataset,level:'无效'}}).some(i=>i.field==='level'))
+  data.standards.push({id:'scale-rule',category:'元数据规范',field:'scale',name:'规划量',dataType:'数值',required:true,min:10,max:1000,enabled:true})
+  data.standards.find(r=>r.id==='policy-storage').metadataFields.push('scale')
+  assert.ok(validateGovernance(data,'save',{dataset:{...dataset,scale:1}}).some(i=>i.field==='scale'))
+  data.standards.find(r=>r.id==='policy-security').internalSharing='禁止共享'
+  assert.ok(validateGovernance(data,'request',{dataset}).length)
+  const version=data.versions.find(v=>v.datasetId==='industry-health'&&v.status==='已发布')
+  assert.equal(canDownload(version,[],'管理员',data.datasets.find(d=>d.id===version.datasetId)),false)
+})
+
+
+test('规范演示样例：两个未发布数据集分别触发等级和采集来源规则，修正后通过', () => {
+  const data = ensureGovernance(ensureProjects(addGovernanceDemoDatasets(initialData())))
+  const meta = data.datasets.find(d=>d.id==='governance-demo-metadata')
+  const collection = data.datasets.find(d=>d.id==='governance-demo-collection')
+  for (const dataset of [meta,collection]) {
+    assert.equal(dataset.owner,data.role)
+    assert.equal(dataset.downloads,0)
+    assert.equal(dataset.project,'规范约束演示')
+    assert.ok(data.versions.some(v=>v.datasetId===dataset.id && v.records.length))
+    assert.ok(!data.versions.some(v=>v.datasetId===dataset.id && v.status==='已发布'))
+  }
+  assert.ok(validateGovernance(data,'publish',{dataset:meta}).some(i=>i.field==='level'))
+  meta.level='内部'
+  assert.equal(validateGovernance(data,'publish',{dataset:meta}).length,0)
+  assert.ok(validateGovernance(data,'import',{dataset:collection,file:{name:'data.txt',size:20}}).some(i=>i.field==='source'))
+  collection.source='流域监测站观测记录'
+  assert.equal(validateGovernance(data,'import',{dataset:collection,file:{name:'data.txt',size:20}}).length,0)
+  addGovernanceDemoDatasets(data)
+  assert.equal(data.datasets.filter(d=>d.id.startsWith('governance-demo-')).length,2)
+  assert.equal(collection.source,'流域监测站观测记录')
+  data.datasets=data.datasets.filter(d=>d.id!==meta.id)
+  addGovernanceDemoDatasets(data)
+  assert.ok(!data.datasets.some(d=>d.id===meta.id))
 })

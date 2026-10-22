@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { state, selectedVersions, selectedSources, addVersion, requireAction, notify, runTask, allowed } from '../store'
+import { state, checkGovernance, selectedVersions, selectedSources, addVersion, requireAction, notify, runTask, allowed } from '../store'
 import { sampleImage, qaSamples } from '../data'
 import { uid, now, isDatasetVersion } from '../domain'
 const emit = defineEmits(['navigate'])
@@ -28,6 +28,7 @@ watch(() => state.activeDataset, () => { versionId.value = versions.value[0]?.id
 watch(imageId, () => { boxes.value = []; draftId.value = ''; const v = selectedVersions().find(v => v.type === '图像标注' && v.sourceId === imageId.value); if (v) boxes.value = JSON.parse(JSON.stringify(v.records[0]?.boxes || [])) })
 watch(tab, () => { draftId.value = ''; task.value = null })
 function save(submit = false) {
+  if (!checkGovernance('save')) return
   if (!requireAction('edit')) return
   if (tab.value === '问答标注' && !records.value.length) return ElMessage.warning('请选择问答成果')
   if (submit && tab.value === '问答标注' && records.value.some(r => !r.label)) return ElMessage.warning('请完成每条数据的可用性标注，再提交审核')
