@@ -6,6 +6,10 @@ import 'element-plus/dist/index.css'
 import './style.css'
 import './workspace.css'
 import './knowledgeGraph.css'
+import './projectConfig.css'
+import './preprocessing.css'
+import './knowledgeBase.css'
+import './annotationReview.css'
 import App from './App.vue'
 
 const app = createApp(App)

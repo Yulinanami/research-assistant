@@ -3,7 +3,7 @@ import { chunkRecords } from './workflow.js'
 export const graphEntityTypes = ['概念', '对象', '指标', '方法', '组织', '地点']
 const keyOf = value => value.normalize('NFKC').trim().toLocaleLowerCase()
 const clone = value => JSON.parse(JSON.stringify(value))
-const scientificTerms = ['土壤含水量','质量含水率','作物','烘干法','采样深度','试验田','A组','B组','水分质量','干土质量','产量']
+export const graphScientificTerms = ['土壤含水量','质量含水率','作物','烘干法','采样深度','试验田','A组','B组','水分质量','干土质量','产量']
 function hash(text) {
   let value = 2166136261
   for (const char of text) value = Math.imul(value ^ char.codePointAt(0), 16777619)
@@ -29,7 +29,7 @@ export function extractKnowledgeGraph(input, config = {}) {
   for (const chunk of chunks) {
     const quoted = [...chunk.content.matchAll(/[“「《"]([^”」》"\n]{2,40})[”」》"]/gu)].map(match => match[1])
     const english = [...chunk.content.matchAll(/\b[A-Z][A-Za-z0-9_-]{1,39}\b/g)].map(match => match[0])
-    const terms = hints.length ? hints : [...scientificTerms, ...quoted, ...english]
+    const terms = hints.length ? hints : [...graphScientificTerms, ...quoted, ...english]
     const inChunk = []
     for (const name of terms) {
       if (!chunk.content.includes(name)) continue

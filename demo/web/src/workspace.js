@@ -1,11 +1,13 @@
 import { isDatasetVersion } from './domain.js'
 import { preparationInputs } from './workflow.js'
 import { validateConversations } from './imports.js'
+import { defaultPrompts } from './promptConfig.js'
 
 export function defaultSettings() {
   return {
+    prompts: defaultPrompts(),
     parsing: { format: 'Markdown', pdfType: '自动识别', options: ['表格', '图片'], sheets: '全部工作表' },
-    generation: { size: 180, chunkType: '固定大小', separator: '\\n\\n', style: '简明说明' },
+    generation: { size: 180, chunkType: '固定大小', separator: '\\n\\n', paragraphsPerChunk: 1, style: '简明说明' },
     audiences: [
       { id: 'researcher', name: '科研人员', prompt: '面向农业科研人员，依据参考资料准确回答，保留专业术语、实验条件与来源，不编造结论。' },
       { id: 'technician', name: '基层农技人员', prompt: '面向基层农技人员，用简明、可操作的语言解释参考资料，说明适用条件，不添加资料没有的结论。' },
@@ -19,7 +21,7 @@ export function defaultSettings() {
     cleaningPresets: [
       { id: 'general', name: '通用文本规范化', rules: ['格式标准化', '文档去重'], minChars: 10 },
       { id: 'privacy', name: '脱敏与质量筛选', rules: ['格式标准化', '隐私脱敏', '质量过滤'], minChars: 20 },
-      { id: 'research', name: '科研正文去重', rules: ['移除think标签', '格式标准化', '文档去重'], minChars: 10 },
+      { id: 'research', name: '科研正文去重', rules: ['格式标准化', '文档去重'], minChars: 10 },
     ],
     export: { format: 'json', schema: '原始结构' },
   }
@@ -28,12 +30,15 @@ export function defaultSettings() {
 // Extend existing local records in place; keep their IDs, versions and attachments.
 export function migrateWorkspace(data) {
   data.projects ||= []
+  data.researchGroups ||= [{id:'research-group',name:'科研课题组',memberIds:['管理员','加工人员','审核人员']}]
   const defaults = defaultSettings()
   data.settings = { ...defaults, ...data.settings,
+    prompts: { ...defaults.prompts, ...data.settings?.prompts },
     parsing: { ...defaults.parsing, ...data.settings?.parsing },
     generation: { ...defaults.generation, ...data.settings?.generation },
     export: { ...defaults.export, ...data.settings?.export } }
   data.flows ||= []
+  for (const preset of data.settings.cleaningPresets) preset.rules = preset.rules.filter(rule => rule !== '移除think标签')
   for (const project of data.projects) project.flowSteps ||= ['文本清洗','知识片段','问答生成']
   for (const [i, dataset] of data.datasets.entries()) {
     let project = data.projects.find(p => p.id === dataset.projectId) || data.projects.find(p => p.name === (dataset.project || '未分组项目'))
@@ -50,6 +55,7 @@ export function migrateWorkspace(data) {
   for (const collection of ['sources', 'versions', 'tasks', 'requests', 'services']) {
     for (const record of data[collection] || []) record.projectId ||= data.datasets.find(d => d.id === record.datasetId)?.projectId || ''
   }
+  for (const project of data.projects) project.visibility ||= 'all'
   data.activeProjectId ||= data.datasets.find(d => d.id === data.activeDataset)?.projectId || ''
   for (const term of data.terms) term.scope ||= 'sample'
   if (!data.terms.some(term => term.field === 'crop_type')) data.terms.push({ id: 'field-crop', field: 'crop_type', name: '作物类型', type: '文本', scope: 'dataset', description: '该数据集研究的主要作物，用于填写与检索。', required: false, unit: '' })

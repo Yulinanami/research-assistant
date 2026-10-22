@@ -16,6 +16,8 @@ export function taskDuration(task, currentTime = Date.now()) {
 }
 
 export function taskModel(task, models) {
+  if (task.type === '标注成果审核') return '人工审核'
+  if (task.type === '知识编译') return '本地编译（演示）'
   if (task.type === '知识图谱') return '本地抽取（演示）'
   if (task.type === '知识图谱标注') return '人工标注'
   if (task.modelName) return task.modelName
@@ -29,12 +31,14 @@ export function taskModel(task, models) {
 }
 
 export function taskSummary(task, versions) {
+  if (task.type === '标注成果审核') return task.logs?.at(-1) || task.status
   if (task.status === '失败') return task.logs?.at(-1) || '任务执行失败'
   if (task.status === '已中断') return task.logs?.at(-1) || '任务执行已中断'
   if (task.status === '执行中') return task.logs?.at(-1) || '正在处理'
   const result = versions.find(version => version.id === task.versionId && version.datasetId === task.datasetId)
   if (!result) return task.logs?.at(-1) || '暂无成果'
   const records = result.records || []
+  if (task.type === '知识编译') return '已编译知识页面，保留摘要、正文摘录与来源，等待汇入全局图谱'
   if (taskCategory(task) === '知识图谱') {
     const graph = records.find(record => record.knowledge_graph)?.knowledge_graph
     if (graph) return `${graph.entities.length} 个实体、${graph.relationships.length} 条关系 · ${graph.reviewed ? '已人工校订' : '待人工校订'}`

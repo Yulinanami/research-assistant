@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Delete } from '@element-plus/icons-vue'
 import { state, allowed, runTask, retryProjectFlow, notify, visibleProjects, openProject, datasetName, removeTaskRecord } from '../store'
 import { taskCategory, taskDuration, taskModel, taskSummary } from '../tasks'
+import { isDatasetVersion } from '../domain'
 
 const emit = defineEmits(['navigate'])
 const scope = state.ui.taskCenterScope
@@ -25,7 +26,7 @@ const projects = computed(visibleProjects)
 const taskStatuses = computed(() => [...new Set(['执行中', '标注中', '已提交', '已完成', '失败',
   ...state.tasks.filter(task => allowed('view', task.datasetId)).map(task => task.status)])])
 const visibleTasks = computed(() => state.tasks.filter(task => allowed('view',task.datasetId) && projects.value.some(item => item.id === task.projectId)))
-const taskTypes = computed(() => [...new Set(['数据解析','数据清洗','知识片段','知识图谱','问答生成','问答增强','图片描述','图片问答','数据标注',...visibleTasks.value.map(taskCategory)])])
+const taskTypes = computed(() => [...new Set(['数据解析','数据清洗','知识片段','知识编译','知识图谱','问答生成','问答增强','图片描述','图片问答','数据标注',...visibleTasks.value.map(taskCategory)])])
 const filterDatasets = computed(() => state.datasets.filter(item => allowed('view',item.id) && (!projectId.value || item.projectId === projectId.value)))
 const tasks = computed(() => visibleTasks.value.filter(task =>
   (!datasetId.value || task.datasetId === datasetId.value)
@@ -77,7 +78,16 @@ function retry(task) {
 function openResult(item, versionId, page = 'versions') {
   if (!openProject(item.projectId, item.datasetId)) return
   state.focusVersion = versionId || ''
-  if (page === 'generation') state.ui.annotationMode = '问答人工复核'
+  if (page === 'generation') {
+    const version = state.versions.find(record => record.id === state.focusVersion && record.datasetId === item.datasetId)
+    if (version && !isDatasetVersion(version) && ['问答生成', '问答增强'].includes(version.type)) {
+      state.ui.preprocessingMode = version.type
+      state.ui.preprocessingReview = { datasetId: item.datasetId, versionId: version.id }
+      emit('navigate', 'processing')
+      return
+    }
+    state.ui.annotationMode = '问答人工复核'
+  }
   emit('navigate', page)
 }
 </script>

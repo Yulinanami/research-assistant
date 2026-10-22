@@ -1,0 +1,196 @@
+{
+    "observed_at":  "2026-10-22",
+    "service":  "http://127.0.0.1:8080",
+    "endpoint":  "/api/templates/",
+    "template_count":  69,
+    "groups":  [
+                   "Computer Vision",
+                   "Natural Language Processing",
+                   "Audio/Speech Processing",
+                   "Conversational AI",
+                   "Chat",
+                   "Ranking \u0026 Scoring",
+                   "Structured Data Parsing",
+                   "Time Series Analysis",
+                   "Videos",
+                   "Generative AI",
+                   "Community Contributions"
+               ],
+    "examples":  [
+                     {
+                         "title":  "Image Captioning",
+                         "group":  "Computer Vision",
+                         "slug":  "computer-vision/image-captioning"
+                     },
+                     {
+                         "title":  "Image Classification",
+                         "group":  "Computer Vision",
+                         "slug":  "computer-vision/image-classification"
+                     },
+                     {
+                         "title":  "Inventory Tracking",
+                         "group":  "Computer Vision",
+                         "slug":  "computer-vision/inventory-tracking"
+                     },
+                     {
+                         "title":  "Keypoint Labeling",
+                         "group":  "Computer Vision",
+                         "slug":  "computer-vision/keypoints"
+                     },
+                     {
+                         "title":  "Medical Image Classification with Bounding Boxes",
+                         "group":  "Computer Vision",
+                         "slug":  "computer-vision/medical-image-classification-with-bboxes"
+                     },
+                     {
+                         "title":  "Multi-page document annotation",
+                         "group":  "Computer Vision",
+                         "slug":  "computer-vision/multipage-documents"
+                     },
+                     {
+                         "title":  "Object Detection with Bounding Boxes",
+                         "group":  "Computer Vision",
+                         "slug":  "computer-vision/object-detection-with-bounding-boxes"
+                     },
+                     {
+                         "title":  "Optical Character Recognition",
+                         "group":  "Computer Vision",
+                         "slug":  "computer-vision/optical-character-recognition"
+                     },
+                     {
+                         "title":  "OCR Labeling for PDFs",
+                         "group":  "Computer Vision",
+                         "slug":  "computer-vision/pdf_ocr"
+                     },
+                     {
+                         "title":  "Semantic Segmentation with Masks",
+                         "group":  "Computer Vision",
+                         "slug":  "computer-vision/semantic-segmentation-with-masks"
+                     },
+                     {
+                         "title":  "Semantic Segmentation with Polygons",
+                         "group":  "Computer Vision",
+                         "slug":  "computer-vision/semantic-segmentation-with-polygons"
+                     },
+                     {
+                         "title":  "Visual Genome",
+                         "group":  "Computer Vision",
+                         "slug":  "computer-vision/visual-genome"
+                     },
+                     {
+                         "title":  "Visual Question Answering",
+                         "group":  "Computer Vision",
+                         "slug":  "computer-vision/visual-question-answering"
+                     },
+                     {
+                         "title":  "Coreference Resolution \u0026 Entity Linking",
+                         "group":  "Conversational AI",
+                         "slug":  "conversational-ai/coreference-resolution-and-entity-linking"
+                     },
+                     {
+                         "title":  "Intent Classification and Slot Filling",
+                         "group":  "Conversational AI",
+                         "slug":  "conversational-ai/intent-classification-and-slot-filling"
+                     },
+                     {
+                         "title":  "Response Generation",
+                         "group":  "Conversational AI",
+                         "slug":  "conversational-ai/response-generation"
+                     },
+                     {
+                         "title":  "Response Selection",
+                         "group":  "Conversational AI",
+                         "slug":  "conversational-ai/response-selection"
+                     },
+                     {
+                         "title":  "Chatbot Model Assessment",
+                         "group":  "Generative AI",
+                         "slug":  "generative-ai/chatbot-assessment"
+                     },
+                     {
+                         "title":  "Human Preference collection for RLHF",
+                         "group":  "Generative AI",
+                         "slug":  "generative-ai/human-feedback-collection"
+                     },
+                     {
+                         "title":  "LLM Ranker",
+                         "group":  "Generative AI",
+                         "slug":  "generative-ai/llm-ranker"
+                     },
+                     {
+                         "title":  "LLM Response Grading",
+                         "group":  "Generative AI",
+                         "slug":  "generative-ai/response-grading"
+                     },
+                     {
+                         "title":  "Supervised Language Model Fine-tuning",
+                         "group":  "Generative AI",
+                         "slug":  "generative-ai/supervised-llm"
+                     },
+                     {
+                         "title":  "Visual Ranker",
+                         "group":  "Generative AI",
+                         "slug":  "generative-ai/visual-ranker"
+                     },
+                     {
+                         "title":  "Content Moderation",
+                         "group":  "Natural Language Processing",
+                         "slug":  "natural-language-processing/content-moderation"
+                     },
+                     {
+                         "title":  "Machine Translation",
+                         "group":  "Natural Language Processing",
+                         "slug":  "natural-language-processing/machine-translation"
+                     },
+                     {
+                         "title":  "Named Entity Recognition",
+                         "group":  "Natural Language Processing",
+                         "slug":  "natural-language-processing/named-entity-recognition"
+                     },
+                     {
+                         "title":  "Question Answering",
+                         "group":  "Natural Language Processing",
+                         "slug":  "natural-language-processing/question-answering"
+                     },
+                     {
+                         "title":  "Relation Extraction",
+                         "group":  "Natural Language Processing",
+                         "slug":  "natural-language-processing/relation-extraction"
+                     },
+                     {
+                         "title":  "Taxonomy",
+                         "group":  "Natural Language Processing",
+                         "slug":  "natural-language-processing/taxonomy"
+                     },
+                     {
+                         "title":  "Text Classification",
+                         "group":  "Natural Language Processing",
+                         "slug":  "natural-language-processing/text-classification"
+                     },
+                     {
+                         "title":  "Text Summarization",
+                         "group":  "Natural Language Processing",
+                         "slug":  "natural-language-processing/text-summarization"
+                     },
+                     {
+                         "title":  "Freeform Metadata",
+                         "group":  "Structured Data Parsing",
+                         "slug":  "structured-data-parsing/freeform-metadata"
+                     },
+                     {
+                         "title":  "HTML Entity Recognition",
+                         "group":  "Structured Data Parsing",
+                         "slug":  "structured-data-parsing/html-entity-recognition"
+                     },
+                     {
+                         "title":  "PDF Classification",
+                         "group":  "Structured Data Parsing",
+                         "slug":  "structured-data-parsing/pdf-classification"
+                     },
+                     {
+                         "title":  "Tabular Data",
+                         "group":  "Structured Data Parsing",
+                         "slug":  "structured-data-parsing/tabular-data"
+                     }
+                 ]
+}

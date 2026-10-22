@@ -21,7 +21,7 @@ function edit(row) {
   fields.value = dictionary ? [
     { key: 'name', label: '字段名称', required: true }, { key: 'field', label: '字段编码', required: true }, {key:'scope',label:'作用范围',type:'select',options:[{value:'dataset',label:'数据集元数据'},{value:'sample',label:'样本业务字段'}],default:'dataset'}, { key: 'type', label: '字段类型', type: 'select', options: ['数值', '文本', '枚举', '日期', '布尔'], default: '文本' }, {key:'enumValues',label:'枚举值（逗号分隔）'}, {key:'required',label:'必填字段',type:'switch',default:false}, { key: 'unit', label: '单位' }, { key: 'description', label: '定义与说明', type: 'textarea', required: true },
   ] : [{ key: 'name', label: '名称', required: true }, { key: 'description', label: tab.value === '场景清洗流程' ? '场景与处理步骤' : '规范内容', type: 'textarea', rows: 7, required: true }]
-  if (tab.value === '场景清洗流程') fields.value.push({ key: 'rules', label: '清洗步骤', type: 'checks', options: ['文档去重', '质量过滤', '隐私脱敏', '格式标准化', '移除think标签'], default: ['文档去重', '格式标准化'] })
+  if (tab.value === '场景清洗流程') fields.value.push({ key: 'rules', label: '清洗步骤', type: 'checks', options: ['文档去重', '质量过滤', '隐私脱敏', '格式标准化'], default: ['文档去重', '格式标准化'] })
   initial.value = row || {}; dialogTitle.value = `${row ? '编辑' : '新增'}${tab.value}`
   handler = data => {
     if (dictionary && (!/^[A-Za-z][A-Za-z0-9_]*$/.test(data.field) || data.field === 'dataset_code' || state.terms.some(term=>term.id !== row?.id && term.field === data.field))) { ElMessage.warning('字段编码需以字母开头，仅含字母、数字与下划线，且不能重复或占用系统编号字段。');return false }

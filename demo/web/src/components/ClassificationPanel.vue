@@ -1,13 +1,13 @@
 <script setup>
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { state, selectedSources, selectedVersions, allowed, addVersion, taskName, notify, submitForReview } from '../store'
+import { state, selectedSources, selectedVersions, allowed, addVersion, taskName, notify, submitAnnotationResult } from '../store'
 import { classificationInputs, generationInputs } from '../workspace'
 import { isDatasetVersion } from '../domain'
 import AnnotationImport from './AnnotationImport.vue'
 import { classificationKind, classificationDraft, recordAnnotationTask, validateClassification } from '../annotation'
 const props = defineProps({ kind: String })
-const emit = defineEmits(['navigate'])
+const emit = defineEmits(['navigate', 'review'])
 const templateId = ref(state.settings.labelTemplates.find(t => t.kind === props.kind)?.id || '')
 const templateSnapshot = ref(null)
 const templates = computed(() => state.settings.labelTemplates.filter(t => t.kind === props.kind))
@@ -149,7 +149,7 @@ function save(submit = false) {
   const progress = Math.round(records.value.filter(record => record.labels.length).length / records.value.length * 100)
   const task = recordAnnotationTask(state.tasks, version, type.value, progress, taskName(type.value))
   if (submit) {
-    if (submitForReview(version)) { task.status = '已提交'; emit('navigate', 'audit') }
+    if (submitAnnotationResult(version)) { task.status = '已提交'; emit('review', version.id) }
   } else notify('分类草稿已保存到项目成果')
 }
 </script>
