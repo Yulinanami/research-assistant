@@ -43,6 +43,7 @@ const authorizedVersions = id => state.versions.filter(v => v.datasetId === id &
 const approved = id => authorizedVersions(id).length > 0
 const versionsFor = id => state.versions.filter(v => v.datasetId === id && isDatasetVersion(v) && (props.page === 'plaza' || !owned(state.datasets.find(d=>d.id===id)) ? v.status === '已发布' : true)).sort((a,b)=>b.number-a.number)
 const latestReleaseFor = dataset => versionsFor(dataset.id).find(version => version.status === '已发布')
+const cardVersionFor = dataset => latestReleaseFor(dataset) || versionsFor(dataset.id)[0]
 const downloadsFor = dataset => latestReleaseFor(dataset) ? (dataset.downloads || 0) : 0
 const publisherFor = dataset => dataset.publisherId || versionsFor(dataset.id).find(version => version.status === '已发布')?.release?.publisher || dataset.owner || '管理员'
 const plazaDatasets = computed(() => state.datasets.filter(dataset => allowed('view',dataset.id) && dataset.storageState!=='已归档' && versionsFor(dataset.id).length))
@@ -83,7 +84,29 @@ function submit(data) { if (submitUsageRequest(requestVersion.value,data)) formO
     <div class="plaza-sorting" role="group" aria-label="数据集排序"><button :class="{active:sortBy==='updated'}" :aria-pressed="sortBy==='updated'" @click="sortBy='updated'"><el-icon><Clock /></el-icon>最新更新</button><button :class="{active:sortBy==='downloads'}" :aria-pressed="sortBy==='downloads'" @click="sortBy='downloads'"><el-icon><Download /></el-icon>最多下载</button></div></div>
   </section>
   <section v-else class="directory-toolbar"><div class="toolbar"><el-input v-model="search" placeholder="搜索数据集名称或编号" clearable><template #prefix><el-icon><Search /></el-icon></template></el-input><el-radio-group v-if="page==='catalog'" v-model="scope"><el-radio-button v-for="name in ['全部','我的数据集','已获授权']" :key="name" :value="name">{{ name }}</el-radio-button></el-radio-group><span class="toolbar-spacer"></span><span class="muted">{{ datasets.length }} 个数据集</span></div></section>
-  <div v-if="datasets.length" class="recommendation-table-wrap plaza-list"><table class="recommendation-table plaza-table"><thead><tr><th scope="col">数据集名称</th><th scope="col">类型</th><th scope="col">领域</th><th scope="col">发布者</th><th scope="col" class="numeric">版本数</th><th scope="col" class="numeric">下载量</th></tr></thead><tbody><tr v-for="dataset in datasets.slice((plazaPage - 1) * 10, plazaPage * 10)" :key="dataset.id"><td><button class="recommendation-name" @click="open(dataset)"><el-icon :class="dataset.coverTone || 'blue'"><component :is="dataset.coverIcon || (dataset.type==='图片'?'PictureFilled':dataset.type==='问答对'?'ChatDotRound':'Reading')" /></el-icon><span>{{ dataset.name }}</span><el-tag v-if="latestReleaseFor(dataset)" size="small" type="info" class="plaza-version-tag">{{ latestReleaseFor(dataset).release?.tag || `V${latestReleaseFor(dataset).number}` }}</el-tag><el-tag v-else-if="owned(dataset) && dataset.storageState!=='已归档'" size="small" type="warning" class="plaza-version-tag">待发布</el-tag><el-tag v-if="dataset.storageState==='已归档'" type="info" size="small">已归档</el-tag></button><div class="plaza-introduction" :class="{'is-complete':descriptionOverflow[dataset.id] === false}"><div v-if="page==='catalog'" class="catalog-access-tags tags"><el-tag v-if="owned(dataset)" type="primary"><el-icon><FolderOpened /></el-icon>我的数据集</el-tag><el-tag v-else-if="approved(dataset.id)" type="success"><el-icon><CircleCheck /></el-icon>已获授权 · {{ authorizedVersions(dataset.id).length }} 个版本</el-tag></div><p v-description-overflow="dataset.id" class="plaza-description">{{ descriptionFor(dataset) }}</p><div class="plaza-description-footer"><button v-if="descriptionOverflow[dataset.id]" class="plaza-description-toggle" @click="open(dataset)">详情<el-icon><ArrowRight /></el-icon></button><time v-if="publishedTimeFor(dataset)" class="plaza-release-time" :datetime="publishedTimeFor(dataset).replaceAll('/','-').replace(' ','T')"><el-icon><Clock /></el-icon>{{ publishedLabelFor(dataset) }}</time></div></div></td><td>{{ dataset.type }}</td><td>{{ dataset.industry || dataset.project }}</td><td>{{ publisherFor(dataset) }}</td><td class="numeric">{{ versionsFor(dataset.id).length }}</td><td class="numeric"><span class="dataset-downloads" aria-label="下载量"><el-icon><Download /></el-icon>{{ downloadsFor(dataset).toLocaleString() }}</span></td></tr></tbody></table></div>
+  <section v-if="datasets.length" class="plaza-card-grid" :aria-label="page==='catalog'?'数据目录数据集':'数据广场数据集'">
+    <article v-for="dataset in datasets.slice((plazaPage - 1) * 10, plazaPage * 10)" :key="dataset.id" class="plaza-dataset-card">
+      <div class="plaza-card-heading">
+        <span :class="['plaza-card-icon', dataset.coverTone || 'blue']" aria-hidden="true"><el-icon><component :is="dataset.coverIcon || (dataset.type==='图片'?'PictureFilled':dataset.type==='问答对'?'ChatDotRound':'Reading')" /></el-icon></span>
+        <h3><button class="plaza-card-name" @click="open(dataset)">{{ dataset.name }}</button><el-tag v-if="latestReleaseFor(dataset)" size="small" type="info">{{ latestReleaseFor(dataset).release?.tag || `V${latestReleaseFor(dataset).number}` }}</el-tag><el-tag v-else-if="owned(dataset) && dataset.storageState!=='已归档'" size="small" type="warning">待发布</el-tag><el-tag v-if="dataset.storageState==='已归档'" type="info" size="small">已归档</el-tag></h3>
+      </div>
+      <div class="plaza-card-summary">
+        <p v-description-overflow="dataset.id" class="plaza-description">{{ descriptionFor(dataset) }}</p>
+        <button v-if="descriptionOverflow[dataset.id]" class="plaza-description-toggle" @click="open(dataset)">详情<el-icon><ArrowRight /></el-icon></button>
+      </div>
+      <div v-if="page==='catalog'" class="catalog-access-tags tags"><el-tag v-if="owned(dataset)" type="primary"><el-icon><FolderOpened /></el-icon>我的数据集</el-tag><el-tag v-else-if="approved(dataset.id)" type="success"><el-icon><CircleCheck /></el-icon>已获授权 · {{ authorizedVersions(dataset.id).length }} 个版本</el-tag></div>
+      <div class="plaza-card-tags"><el-tag effect="plain">{{ dataset.type }}</el-tag><el-tag v-if="dataset.industry || dataset.project" type="info" effect="plain">{{ dataset.industry || dataset.project }}</el-tag></div>
+      <div class="plaza-card-publisher"><span class="plaza-card-publisher-label">{{ latestReleaseFor(dataset)?'发布者':'创建者' }}</span><span>{{ publisherFor(dataset) }}</span></div>
+      <div class="plaza-card-footer">
+        <div class="plaza-card-counts">
+          <span><el-icon aria-hidden="true"><Files /></el-icon>{{ (cardVersionFor(dataset)?.totalRecords ?? cardVersionFor(dataset)?.records.length ?? 0).toLocaleString() }} {{ dataset.type==='图片'?'张':'条' }}</span>
+          <span><el-icon aria-hidden="true"><DocumentCopy /></el-icon>{{ versionsFor(dataset.id).length }} 个版本</span>
+          <span><el-icon aria-hidden="true"><Download /></el-icon>{{ downloadsFor(dataset).toLocaleString() }} 次下载</span>
+        </div>
+        <time v-if="publishedTimeFor(dataset)" :datetime="publishedTimeFor(dataset).replaceAll('/','-').replace(' ','T')">{{ publishedLabelFor(dataset) }}</time>
+      </div>
+    </article>
+  </section>
 
   <el-pagination v-if="datasets.length" v-model:current-page="plazaPage" :page-size="10" :pager-count="5" :total="datasets.length" layout="total, prev, pager, next" :aria-label="page==='catalog'?'数据目录分页':'数据广场分页'" class="plaza-pagination" />
   <section v-if="!datasets.length" class="panel"><el-empty :description="page==='catalog'?'暂无自己的或已获准使用的数据集':(search || selectedType || selectedIndustry ? '没有匹配的数据集' : '暂无已发布的共享数据集')"><el-button v-if="page==='catalog'" type="primary" @click="$emit('navigate','plaza')"><el-icon><Grid /></el-icon>去数据广场</el-button></el-empty></section>
