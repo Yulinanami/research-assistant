@@ -395,6 +395,45 @@ export function classificationUses(data, id) {
   return data.datasets.filter(dataset=>[dataset.domainId,dataset.subdomainId,dataset.typeId].includes(id))
 }
 
+export function clearLegacyFieldGovernance(data) {
+  data.terms=[];data.fieldTemplates=[];data.qualityReports=[]
+  data.standardVersions=(data.standardVersions || []).filter(item=>!['terms','fieldTemplates'].includes(item.collection))
+  const clearBinding = dataset => {
+    if (!dataset) return
+    for (const key of ['fieldTemplateId','requiresQuality','fieldMappings','manualReviewInstructions']) delete dataset[key]
+  }
+  data.datasets.forEach(clearBinding)
+  for (const version of data.versions) {
+    const evidence=version.release?.evidence
+    if (!evidence) continue
+    for (const key of ['contentTemplate','fields','qualityReportId']) delete evidence[key]
+    clearBinding(evidence.metadata)
+  }
+  delete data.focusQualityIssue
+  data.legacyFieldRulesRemoved=true
+  return data
+}
+
+export function clearLifecycleStandards(data) {
+  for (const key of ['standards','governanceChecks','manualConfirmations','storagePolicies']) data[key]=[]
+  data.standardVersions=(data.standardVersions || []).filter(item=>!['standards','storagePolicies'].includes(item.collection))
+  const clearBinding = dataset => {
+    if (!dataset) return
+    delete dataset.policyIds
+    delete dataset.storagePolicyId
+  }
+  data.datasets.forEach(clearBinding)
+  for (const version of data.versions) {
+    const evidence=version.release?.evidence
+    if (!evidence) continue
+    for (const key of ['execution','standards','storagePolicy','checkId']) delete evidence[key]
+    clearBinding(evidence.metadata)
+  }
+  data.usageEvents=(data.usageEvents || []).filter(item=>item.action!=='发布检查')
+  data.lifecycleStandardsRemoved=true
+  return data
+}
+
 export function saveClassification(data, id, definition, operator) {
   const current = data.classifications.find(item=>item.id===id)
   const next = {kind:definition.kind,name:definition.name?.trim(),code:definition.code?.trim(),parentId:definition.parentId || '',enabled:definition.enabled!==false,description:definition.description || ''}
@@ -489,9 +528,10 @@ export function executionStandards(data,dataset,operation) {
 
 export function publicationEvidence(data,version,operator) {
   const dataset=data.datasets.find(item=>item.id===version.datasetId)
+  if (data.lifecycleStandardsRemoved) return governanceCopy({created:now(),operator,datasetId:dataset.id,versionId:version.id,metadata:dataset})
   const report=data.qualityReports?.find(item=>item.versionId===version.id)
   const execution=data.governanceChecks?.find(item=>item.versionId===version.id && item.operation==='publish')
-  return governanceCopy({created:now(),operator,datasetId:dataset.id,versionId:version.id,metadata:dataset,execution,standards:execution?.standards || executionStandards(data,dataset,'publish'),storagePolicy:data.storagePolicies.find(item=>item.id===dataset.storagePolicyId),contentTemplate:data.fieldTemplates.find(item=>item.id===dataset.fieldTemplateId),fields:contentFieldsFor(data,dataset),qualityReportId:report?.id || '',checkId:data.governanceChecks?.find(item=>item.versionId===version.id && item.operation==='publish')?.id || ''})
+  return governanceCopy({created:now(),operator,datasetId:dataset.id,versionId:version.id,metadata:dataset,execution,standards:execution?.standards || executionStandards(data,dataset,'publish'),storagePolicy:data.storagePolicies.find(item=>item.id===dataset.storagePolicyId),...(!data.legacyFieldRulesRemoved?{contentTemplate:data.fieldTemplates.find(item=>item.id===dataset.fieldTemplateId),fields:contentFieldsFor(data,dataset),qualityReportId:report?.id || ''}:{}),checkId:data.governanceChecks?.find(item=>item.versionId===version.id && item.operation==='publish')?.id || ''})
 }
 
 export function buildDatasetTrace(data,datasetId,versionId) {
@@ -529,8 +569,6 @@ export function serviceAccess(data,service,user) {
   if (!dataset || !version) return {status:404,message:'发布版本不存在'}
   const permission=data.permissions.find(item=>item.role===user)
   if (!permission?.download || permission.project!=='全部项目' && permission.project!==dataset.project || permission.level!=='内部' && dataset.level!=='公开' || !canDownload(version,data.requests,user,dataset)) return {status:403,message:'尚未获得此发布版本的使用授权'}
-  const issues=validateGovernance({...data,role:user},'download',{dataset,versionId:version.id}).filter(item=>item.action==='阻止操作')
-  if (issues.length) return {status:403,message:issues.map(item=>item.reason).join('；')}
   return {status:200,datasetCode:dataset.code,tag:version.release?.tag || `V${version.number}`,version:version.number,total:version.records.length,records:governanceCopy(exportRecords(version.records))}
 }
 

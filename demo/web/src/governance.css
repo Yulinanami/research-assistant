@@ -94,13 +94,6 @@
 .governance-shell .plaza-release-time>.el-icon{font-size:14px}
 .governance-shell .plaza-pagination{justify-content:center}
 .governance-shell .plaza-table td:not(:first-child){vertical-align:middle}
-.governance-shell .quality-workspace{margin-top:26px;padding-top:24px;border-top:1px solid #e6edf8}
-.governance-shell .quality-workspace h3 .el-icon{margin-right:8px;vertical-align:middle;color:#316af0}
-.governance-shell .quality-summary{display:flex;align-items:center;flex-wrap:wrap;gap:18px;margin:18px 0;padding:14px 16px;background:#f5f8fd;border-radius:8px}
-.governance-shell .quality-workspace .el-collapse{margin:14px 0}
-.governance-shell .quality-workspace .el-collapse .el-textarea{margin-top:14px}
-.governance-shell .quality-issues .muted{overflow-wrap:anywhere}
-.governance-shell .quality-workspace .toolbar .el-select{width:300px}
 .governance-shell .dataset-history .el-timeline{padding:14px 12px 0 18px}
 .governance-shell .dataset-history .el-timeline h4{margin:0 0 7px}
 .governance-shell .dataset-history .el-timeline h4 .el-icon{margin-right:7px;color:#4679dc}

@@ -3,10 +3,67 @@ import { initialData as mainInitialData, seedGovernanceExamples, addIndustryData
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { ensureClassifications, saveClassification, removeClassification, assignDatasetClassification } from '../src/domain.js'
+import { clearLegacyFieldGovernance, clearLifecycleStandards } from '../src/domain.js'
 import { ensureLifecycleGovernance, reviseStandard, confirmManualStandard, storageInfoFor, buildDatasetTrace, publicationEvidence, governanceMetrics, serviceAccess, qualityFingerprint, contentFieldsFor, mapContentRecords, parseCsvRecords, runQualityReport, qualityGateIssues, updateQualityIssue, ensureGovernance, validateGovernance, nextDatasetCode, canDownload, createVersion, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords,  isVersionAuthorized, submitVersionReview } from '../src/domain.js'
 
 function initialData() { return addIndustryDatasets(mainInitialData()) }
 function migrateWorkspace(data) { ensureGovernance(data); return mainMigrateWorkspace(data) }
+
+test('移除流程和元数据规范：清理规则、绑定与检查记录，保留原始内容及审核授权', () => {
+  const data=ensureClassifications(ensureGovernance(initialData()))
+  addContentGovernance(data);ensureLifecycleGovernance(data);seedGovernanceExamples(data)
+  saveClassification(data,null,{kind:'type',code:'CUSTOM',name:'自定义记录'},'管理员')
+  const original=JSON.stringify({records:data.versions.map(item=>item.records),statuses:data.versions.map(item=>[item.status,item.reviewNote]),requests:data.requests,classifications:data.classifications,history:data.standardVersions.filter(item=>item.collection==='classifications')})
+  const version=data.versions.find(item=>item.release?.evidence)
+  const publisher=version.release.evidence.operator
+  clearLifecycleStandards(clearLegacyFieldGovernance(data))
+  for (const key of ['standards','governanceChecks','manualConfirmations','storagePolicies']) assert.deepEqual(data[key],[])
+  assert(data.standardVersions.every(item=>item.collection==='classifications'))
+  assert(data.datasets.every(item=>!Object.hasOwn(item,'policyIds')&&!Object.hasOwn(item,'storagePolicyId')))
+  assert(!data.usageEvents.some(item=>item.action==='发布检查'))
+  for (const key of ['execution','standards','storagePolicy','checkId']) assert.equal(Object.hasOwn(version.release.evidence,key),false)
+  assert.equal(version.release.evidence.operator,publisher)
+  const evidence=publicationEvidence(data,version,'管理员')
+  assert.deepEqual(Object.keys(evidence).sort(),['created','operator','datasetId','versionId','metadata'].sort())
+  const cleaned=JSON.stringify(data)
+  clearLifecycleStandards(data)
+  assert.equal(JSON.stringify(data),cleaned)
+  assert.equal(JSON.stringify({records:data.versions.map(item=>item.records),statuses:data.versions.map(item=>[item.status,item.reviewNote]),requests:data.requests,classifications:data.classifications,history:data.standardVersions.filter(item=>item.collection==='classifications')}),original)
+  const dataset=data.datasets.find(item=>item.id===version.datasetId)
+  Object.assign(dataset,{source:'',format:'自定义格式',type:'自由结构',customDescription:{用途:'自由实验'}})
+  version.records.push({自定义字段:{值:[1,'任意内容']}})
+  assert.deepEqual(validateGovernance(data,'save',{dataset,versionId:version.id}),[])
+  data.requests.push({datasetId:dataset.id,versionId:version.id,user:'管理员',status:'已通过'})
+  const response=serviceAccess(data,{datasetId:dataset.id,versionId:version.id},'管理员')
+  assert.equal(response.status,200)
+  assert.deepEqual(response.records.at(-1),{自定义字段:{值:[1,'任意内容']}})
+  assert.equal(serviceAccess(data,{datasetId:dataset.id,versionId:version.id},'未授权用户').status,403)
+})
+
+test('清理旧字段规则与报告：移除全部绑定和旧快照，保留数据、分类、授权及其他发布依据', () => {
+  const data=ensureClassifications(ensureGovernance(initialData()))
+  addContentGovernance(data);ensureLifecycleGovernance(data);seedGovernanceExamples(data)
+  const original=JSON.stringify({records:data.versions.map(item=>item.records),classifications:data.classifications,requests:data.requests,status:data.versions.map(item=>item.status)})
+  const version=data.versions.find(item=>item.release?.evidence)
+  const tag=version.release.tag
+  clearLegacyFieldGovernance(data)
+  assert.deepEqual(data.terms,[])
+  assert.deepEqual(data.fieldTemplates,[])
+  assert.deepEqual(data.qualityReports,[])
+  assert(!data.standardVersions.some(item=>['terms','fieldTemplates'].includes(item.collection)))
+  assert(data.datasets.every(item=>!Object.hasOwn(item,'fieldTemplateId')&&!Object.hasOwn(item,'requiresQuality')))
+  assert.equal(Object.hasOwn(version.release.evidence,'fields'),false)
+  assert.equal(Object.hasOwn(version.release.evidence,'contentTemplate'),false)
+  assert.equal(Object.hasOwn(version.release.evidence,'qualityReportId'),false)
+  assert.equal(version.release.tag,tag)
+  assert(version.release.evidence.metadata.code)
+  const nextEvidence=publicationEvidence(data,version,'管理员')
+  for (const key of ['fields','contentTemplate','qualityReportId']) assert.equal(Object.hasOwn(nextEvidence,key),false)
+  const cleaned=JSON.stringify(data)
+  clearLegacyFieldGovernance(data)
+  assert.equal(JSON.stringify(data),cleaned)
+  assert.equal(JSON.stringify({records:data.versions.map(item=>item.records),classifications:data.classifications,requests:data.requests,status:data.versions.map(item=>item.status)}),original)
+})
 
 test('分类初始化幂等，补齐样例两级领域且不改写历史字段和发布证据', () => {
   const data=initialData()
