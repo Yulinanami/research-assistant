@@ -1,7 +1,7 @@
 import { reactive, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { initialData, qaSamples, researchText, imageCleaningSamples } from './data'
-import { uid, now, createVersion, canDownload, submitVersionReview, reviewVersion, publishVersion, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords } from './domain'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { initialData, qaSamples, researchText, imageCleaningSamples, addIndustryDatasets, addGovernanceDemoDatasets, addContentGovernance, seedGovernanceExamples } from './data'
+import { ensureGovernance, ensureLifecycleGovernance, reviseStandard, confirmManualStandard, executionStandards, validateGovernance, publicationEvidence, serviceAccess, isDatasetOwner, runQualityReport, qualityGateIssues, uid, now, createVersion, canDownload, submitVersionReview, reviewVersion, publishVersion, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords } from './domain'
 import { cleanBatch, resultContent, parserType, chunkRecords } from './workflow'
 import { migrateWorkspace, generationInputs } from './workspace'
 import { questionEntries } from './annotation'
@@ -10,7 +10,21 @@ import { parseEntries } from './imports'
 import { finishTaskTracking } from './tasks'
 import { extractKnowledgeGraph } from './knowledgeGraph'
 
-export const state = reactive(migrateWorkspace(initialData()))
+function prepareGovernance(data) {
+  addIndustryDatasets(data)
+  addGovernanceDemoDatasets(data)
+  addContentGovernance(data)
+  ensureGovernance(data)
+  migrateWorkspace(data)
+  for (const dataset of data.datasets) {
+    dataset.ownerId = dataset.owner || dataset.ownerId || '管理员'
+    dataset.owner ||= dataset.ownerId
+  }
+  ensureLifecycleGovernance(data)
+  seedGovernanceExamples(data)
+  return migrateWorkspace(data)
+}
+export const state = reactive(prepareGovernance(initialData()))
 export const storage = reactive({ ready: false, error: '', saving: false })
 let db
 let pendingSaves = 0
@@ -37,7 +51,7 @@ export async function initialize() {
       request.onerror = () => reject(request.error)
     })
     const saved = await transact('readonly', store => store.get('state'))
-    if (saved) Object.assign(state, migrateWorkspace(saved))
+    if (saved) Object.assign(state, prepareGovernance(saved))
     for (const flow of state.flows) if (flow.status === '执行中') flow.status = '已中断'
     for (const task of state.tasks) {
       if (task.status === '执行中') {
@@ -335,11 +349,16 @@ export async function deleteSource(source) {
   state.sources.splice(state.sources.indexOf(source), 1)
 }
 export function downloadVersion(version, format = 'json') {
-  if (!requireAction('download', version.datasetId) || !canDownload(version, state.requests, state.role)) return ElMessage.warning('请先申请当前版本并等待审批通过。')
+  if (!requireAction('download', version.datasetId) || !canDownload(version, state.requests, state.role, state.datasets.find(d => d.id === version.datasetId))) return ElMessage.warning('请先申请当前版本并等待审批通过。')
+  if (!checkGovernance('download', {datasetId:version.datasetId,versionId:version.id})) return false
   const records = exportRecords(version.records)
   const content = format === 'md' ? records.map(r => r.question ? `## ${r.question}\n\n${r.answer}\n\n> 来源：${r.reference || '未提供'}` : `## ${r.title || '内容'}\n\n${r.content || JSON.stringify(r)}`).join('\n\n') : JSON.stringify(records, null, 2)
   saveDownload(content, `${datasetName(version.datasetId)}-v${version.number}.${format}`, format === 'md' ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8')
+  const dataset = state.datasets.find(dataset => dataset.id === version.datasetId)
+  if (dataset) dataset.downloads = (dataset.downloads || 0) + 1
+  recordUse('下载',version.id,`格式：${format.toUpperCase()}`,'已发起')
 }
+
 export function submitForReview(version) {
   if (!requireAction('edit', version.datasetId)) return false
   try { submitVersionReview(version, state.role); notify('成果已提交至数据治理与共享的质量审核'); return true }
@@ -347,17 +366,98 @@ export function submitForReview(version) {
 }
 export function review(version, approved, note) {
   if (!requireAction('review', version.datasetId)) return
-  reviewVersion(version, approved, note); notify(approved ? '审核已通过，可发布成果' : '已退回修改')
+  if (approved && !checkQualityGate(version)) return
+  reviewVersion(version, approved, note);version.reviewedBy=state.role; notify(approved ? '审核已通过，可发布成果' : '已退回修改')
 }
-export function publish(version, details) {
-  if (!requireAction('review', version.datasetId)) return false
-  publishVersion(version, details, state.versions, state.role)
-  notify(`${version.release.tag}已发布，可在数据广场查看`)
-  return true
+
+export function publish(version,details) {
+  if (!requireAction('review',version.datasetId)) return false
+  if (!checkGovernance('publish',{datasetId:version.datasetId,versionId:version.id}) || version.status!=='已发布' && !checkQualityGate(version)) {recordUse('发布检查',version.id,'元数据、流程或内容质量检查未通过','未通过');return false}
+  try {
+    const wasPublished=version.status==='已发布'
+    publishVersion(version,details,state.versions,state.role)
+    version.release.evidence ||= {...publicationEvidence(state,version,state.role),basis:wasPublished?'发布信息补录时检查':'发布时检查'}
+    recordUse('发布检查',version.id,version.release.tag,'通过')
+    notify(`${version.release.tag}已发布，可在数据目录查看`);return true
+  } catch (error) {recordUse('发布检查',version.id,error.message,'未通过');throw error}
 }
+
 export async function resetDemo() {
   generation++
   activeTimers.forEach(clearTimeout); activeTimers.clear()
   if (db) await transact('readwrite', store => store.clear())
-  Object.assign(state, migrateWorkspace(initialData())); notify('已恢复初始演示数据')
+  Object.assign(state, prepareGovernance(initialData())); notify('已恢复初始演示数据')
+}
+
+export function checkGovernance(operation, context = {}) {
+  ensureGovernance(state)
+  const dataset=context.dataset || state.datasets.find(item=>item.id===(context.datasetId || state.activeDataset))
+  const issues=validateGovernance(state,operation,{...context,dataset})
+  const labels={import:'采集',save:'存储',publish:'发布',request:'使用申请',download:'下载'}
+  const blocked=issues.some(issue=>issue.action==='阻止操作')
+  const standards=dataset?executionStandards(state,dataset,operation):[]
+  for (const standard of standards) {
+    const mode=standard.executionMode
+    const related=issues.filter(issue=>issue.ruleId===standard.id || standard.field && issue.field===standard.field)
+    standard.result=mode==='后端保障'?'待后端落实':related.length?'未通过':mode==='人工确认'?'已确认':'通过'
+    if (mode==='人工确认') standard.confirmation=JSON.parse(JSON.stringify(state.manualConfirmations.find(item=>item.standardId===standard.id && item.revision===standard.revision && item.datasetId===dataset.id && item.versionId===(context.versionId || '')) || null))
+  }
+  state.governanceChecks.unshift({id:uid('check'),datasetId:dataset?.id,code:dataset?.code,name:dataset?.name,versionId:context.versionId || '',sourceId:context.sourceId || '',sourceName:context.file?.name || '',operation,stage:labels[operation],operator:state.role,created:now(),status:blocked?'未通过':issues.length?'提醒':standards.some(item=>item.executionMode==='后端保障')?'待后端保障':'通过',issues,standards})
+  state.governanceChecks.splice(30)
+  if (issues.length) ElMessageBox.alert(issues.map(issue=>`${issue.rule} · ${issue.field}：${issue.reason}`).join('\n'),blocked?'规范检查未通过':'规范检查提醒',{type:blocked?'error':'warning',confirmButtonText:'知道了'}).catch(()=>{})
+  return !blocked
+}
+
+export function saveStandard(collection,row,definition) {
+  if (!requireAction('edit')) return false
+  reviseStandard(state,collection,row?.id || definition.id || uid('standard'),definition,state.role)
+  notify('已保存新修订');return true
+}
+export function confirmStandard(standardId,datasetId,versionId,note) {
+  if (!requireAction('review',datasetId)) return false
+  confirmManualStandard(state,standardId,datasetId,versionId,note,state.role)
+  notify('人工确认已记录');return true
+}
+export function recordUse(action,versionId,detail='',status='通过') {
+  const version=state.versions.find(item=>item.id===versionId)
+  state.usageEvents.unshift({id:uid('usage'),datasetId:version?.datasetId,versionId,user:state.role,action,detail,status,created:now()})
+}
+export function setArchiveState(dataset,note,restore=false) {
+  if (!allowed('edit',dataset.id) || !isDatasetOwner(dataset,state.role)) return ElMessage.warning('仅数据集所有者可管理归档')
+  if (!note?.trim()) return ElMessage.warning('请填写操作说明')
+  dataset.storageState=restore?'使用中':'已归档'
+  state.storageEvents.unshift({id:uid('archive'),datasetId:dataset.id,action:restore?'恢复使用':'归档',note:note.trim(),operator:state.role,created:now()})
+  notify(restore?'数据集已恢复使用':'数据集已归档，所有版本保留')
+}
+export function submitUsageRequest(version,details) {
+  const dataset=state.datasets.find(item=>item.id===version?.datasetId)
+  if (!version || version.status!=='已发布' || isDatasetOwner(dataset,state.role)) return false
+  if (state.requests.some(item=>item.versionId===version.id && item.user===state.role && item.status==='待审批')) {ElMessage.warning('该版本已有待审批申请');return false}
+  if (!checkGovernance('request',{dataset,versionId:version.id})) return false
+  state.requests.unshift({id:uid('request'),datasetId:dataset.id,versionId:version.id,user:state.role,...details,status:'待审批',created:now()})
+  notify('使用申请已提交');return true
+}
+export function approveUsageRequest(request,pass,note) {
+  if (!requireAction('review',request.datasetId) || pass && !checkGovernance('request',{datasetId:request.datasetId,versionId:request.versionId})) return false
+  request.status=pass?'已通过':'已驳回';request.note=note;request.approvedBy=state.role;request.approved=now()
+  notify(pass?'已授权此申请版本':'申请已驳回');return true
+}
+export function previewService(service) {
+  let response=serviceAccess(state,service,state.role)
+  if (response.status===200 && !checkGovernance('download',{datasetId:service.datasetId,versionId:service.versionId})) response={status:403,message:'共享安全检查未通过'}
+  recordUse('API响应预览',service.versionId,response.message || '已核对版本授权并生成响应',response.status===200?'通过':'拒绝')
+  return response
+}
+
+
+export function executeQualityCheck(version,instructions='') {
+  if (!requireAction('view',version.datasetId)) return null
+  const report=runQualityReport(state,version,instructions)
+  notify(`已检查${report.total}条记录，发现${report.issues.length}个问题`)
+  return report
+}
+export function checkQualityGate(version) {
+  const issues=qualityGateIssues(state,version)
+  if (issues.length) { ElMessageBox.alert(issues.join('\n'),'内容质量检查未通过',{type:'warning',confirmButtonText:'知道了'}).catch(()=>{});return false }
+  return true
 }

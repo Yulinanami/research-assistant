@@ -8,6 +8,8 @@ import ProjectsView from './components/ProjectsView.vue'
 import DatasetLibrary from './components/DatasetLibrary.vue'
 import ProcessView from './components/ProcessView.vue'
 import GovernanceView from './components/GovernanceView.vue'
+import DatasetCatalog from './components/DatasetCatalog.vue'
+import GovernanceResults from './components/GovernanceResults.vue'
 import ResultsView from './components/ResultsView.vue'
 import WorkflowSteps from './components/WorkflowSteps.vue'
 import PreparationView from './components/PreparationView.vue'
@@ -28,6 +30,7 @@ const internalPages = [
 const pages = [...navigation.flatMap(group => group.items), ...internalPages,
   {id:'task-center',title:'任务管理中心',subtitle:'汇总解析、清洗与标注等任务，跟踪进度、耗时和执行结果'}]
 const resolve = id => {
+  id = ({plaza:'square',review:'audit',release:'audit',permissions:'standards'})[id] || id
   if (id === 'cleaning') state.ui.preprocessingStage = 'cleaning'
   return resolveSessionPage(id, Boolean(auth.session), pages.map(item => item.id))
 }
@@ -88,7 +91,7 @@ onMounted(async () => { await initialize(); ensureContext(); syncRoute(); window
       </header>
       <main v-if="storage.ready" class="page-content">
         <el-alert v-if="storage.error" :title="storage.error" type="warning" :closable="false" />
-        <div class="page-heading"><div><div class="eyebrow">{{ inProject || page === 'projects' ? 'DATA PROCESSING' : page === 'settings' ? 'WORKSPACE SETTINGS' : inGovernance ? 'DATA GOVERNANCE' : 'RESEARCH WORKSPACE' }}</div><h1>{{ current.title }}</h1><p>{{ current.subtitle }}</p></div><span class="save-state"><i></i>{{ storage.saving ? '正在保存…' : '已保存到本地' }}</span></div>
+        <div v-if="!inGovernance" class="page-heading"><div><div class="eyebrow">{{ inProject || page === 'projects' ? 'DATA PROCESSING' : page === 'settings' ? 'WORKSPACE SETTINGS' : inGovernance ? 'DATA GOVERNANCE' : 'RESEARCH WORKSPACE' }}</div><h1>{{ current.title }}</h1><p>{{ current.subtitle }}</p></div><span class="save-state"><i></i>{{ storage.saving ? '正在保存…' : '已保存到本地' }}</span></div>
         <template v-if="inProject && project">
           <section class="project-context"><div><span class="icon-tile blue"><el-icon><FolderOpened /></el-icon></span><div><small>当前项目</small><b>{{ project.name }}</b></div></div><div class="project-context-actions"><el-select :model-value="state.activeProjectId" aria-label="切换项目" @change="enterSelectedProject"><el-option v-for="item in visibleProjects()" :key="item.id" :value="item.id" :label="item.name" /></el-select><el-select v-if="datasets.length" v-model="state.activeDataset" aria-label="当前目标数据集"><el-option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id" :label="dataset.name" /></el-select><el-button class="flow-config-entry" @click="flowConfigOpen = true"><el-icon><SetUp /></el-icon>流程配置</el-button><el-button text @click="navigate('projects')">全部项目</el-button></div></section>
           <el-drawer v-model="flowConfigOpen" title="流程配置" size="min(680px, 96vw)" destroy-on-close><ProjectFlowConfig v-if="flowConfigOpen" :key="state.role + ':' + state.activeProjectId" @started="flowStarted" /></el-drawer>
@@ -102,8 +105,12 @@ onMounted(async () => { await initialize(); ensureContext(); syncRoute(); window
         <ProjectsView v-else-if="page === 'projects' || inProject" @navigate="navigate" />
         <TaskCenter v-else-if="page === 'task-center'" @navigate="navigate" />
         <LandingView v-else-if="page === 'workbench'" :page="page" @navigate="navigate" />
-        <DatasetLibrary v-else-if="['mydatasets','catalog','square','requests'].includes(page)" :mode="page" @navigate="navigate" />
-        <ResultsView v-else-if="['audit','release'].includes(page)" :key="page" :page="page" @navigate="navigate" />
+        <DatasetLibrary v-else-if="page === 'mydatasets'" :mode="page" @navigate="navigate" />
+        <div v-else-if="inGovernance" class="governance-shell">
+          <DatasetCatalog v-if="['catalog','square'].includes(page)" :key="page" :page="page==='square'?'plaza':'catalog'" @navigate="navigate" />
+          <GovernanceResults v-else-if="['audit','requests','services'].includes(page)" :key="page" :page="page==='audit'?'review':page" @navigate="navigate" />
+          <GovernanceView v-else :key="page" :page="page" />
+        </div>
         <SettingsView v-else-if="page === 'settings'" @navigate="navigate" />
         <ResultsView v-else-if="page === 'services'" page="services" @navigate="navigate" />
         <GovernanceView v-else :key="page" :page="page" />
