@@ -57,6 +57,17 @@ const datasets = computed(() => {
   if (props.page !== 'plaza') return rows
   return rows.filter(dataset => (!selectedType.value || dataset.type === selectedType.value) && (!selectedIndustry.value || (dataset.industry || dataset.project) === selectedIndustry.value)).sort((a,b) => sortBy.value === 'downloads' ? (b.downloads || 0) - (a.downloads || 0) || updatedTime(b) - updatedTime(a) : updatedTime(b) - updatedTime(a) || (b.downloads || 0) - (a.downloads || 0))
 })
+const plazaStatistics = computed(() => {
+  const totals = { datasets: datasets.value.length, downloads: 0, records: {} }
+  for (const dataset of datasets.value) {
+    const latest = latestReleaseFor(dataset)
+    const unit = dataset.type === '图片' ? '张' : '条'
+    totals.records[unit] = (totals.records[unit] || 0) + (latest?.totalRecords ?? latest?.records.length ?? 0)
+    totals.downloads += downloadsFor(dataset)
+  }
+  totals.records = Object.fromEntries(Object.entries(totals.records).sort(([a], [b]) => a.localeCompare(b)))
+  return totals
+})
 watch(() => datasets.value.length, total => { plazaPage.value = Math.min(plazaPage.value, Math.max(1, Math.ceil(total / 10))) })
 const versions = computed(() => selected.value ? versionsFor(selected.value.id) : [])
 const version = computed(() => versions.value.find(v=>v.id===versionId.value))
@@ -78,8 +89,13 @@ function submit(data) { if (submitUsageRequest(requestVersion.value,data)) formO
 
 </script>
 <template>
+  <div v-if="page==='plaza'" class="plaza-search"><el-input v-model="search" placeholder="搜索数据集名称或编号" aria-label="搜索数据集名称或编号" clearable><template #prefix><el-icon><Search /></el-icon></template></el-input></div>
+  <section v-if="page==='plaza'" class="plaza-statistics" aria-label="数据广场统计">
+    <div class="plaza-statistic"><span class="plaza-statistic-icon"><el-icon><Collection /></el-icon></span><div><span class="plaza-statistic-label">数据集总量</span><strong>{{ plazaStatistics.datasets.toLocaleString() }}<span>个</span></strong></div></div>
+    <div class="plaza-statistic"><span class="plaza-statistic-icon teal"><el-icon><Files /></el-icon></span><div><span class="plaza-statistic-label">数据量</span><div class="plaza-statistic-values"><strong v-for="(total,unit) in plazaStatistics.records" :key="unit">{{ total.toLocaleString() }}<span>{{ unit }}</span></strong><strong v-if="!plazaStatistics.datasets">0</strong></div></div></div>
+    <div class="plaza-statistic"><span class="plaza-statistic-icon purple"><el-icon><Download /></el-icon></span><div><span class="plaza-statistic-label">累计下载量</span><strong>{{ plazaStatistics.downloads.toLocaleString() }}<span>次</span></strong></div></div>
+  </section>
   <section v-if="page==='plaza'" class="plaza-discovery">
-    <div class="plaza-search"><el-input v-model="search" placeholder="搜索数据集名称或编号" aria-label="搜索数据集名称或编号" clearable><template #prefix><el-icon><Search /></el-icon></template></el-input></div>
     <div class="plaza-controls"><div class="plaza-filters"><el-select v-model="selectedType" placeholder="全部类型" aria-label="数据集类型" clearable><template #prefix><el-icon><Files /></el-icon></template><el-option v-for="type in datasetTypes" :key="type" :label="type" :value="type" /></el-select><el-select v-model="selectedIndustry" placeholder="全部领域" aria-label="数据集领域" clearable><template #prefix><el-icon><Grid /></el-icon></template><el-option v-for="industry in datasetIndustries" :key="industry" :label="industry" :value="industry" /></el-select></div>
     <div class="plaza-sorting" role="group" aria-label="数据集排序"><button :class="{active:sortBy==='updated'}" :aria-pressed="sortBy==='updated'" @click="sortBy='updated'"><el-icon><Clock /></el-icon>最新更新</button><button :class="{active:sortBy==='downloads'}" :aria-pressed="sortBy==='downloads'" @click="sortBy='downloads'"><el-icon><Download /></el-icon>最多下载</button></div></div>
   </section>
