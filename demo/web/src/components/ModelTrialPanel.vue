@@ -31,7 +31,7 @@ function send() {
   const session=current.value || createChatSession(state,modelId)
   if (!session.messages.length) session.title=text.slice(0,28)
   session.modelId=modelId
-  session.messages.push({ role:'您', text }, { role:models.value.find(model=>model.id===modelId)?.name || '模型', text:'根据演示材料，A组含水率为20%，B组为25%，两组相差5个百分点。尚无作物产量记录，不能推断增产效果。' })
+  session.messages.push({ role:'您', text }, { role:models.value.find(model=>model.id===modelId)?.name || '模型', text:'根据参考材料，A组含水率为20%，B组为25%，两组相差5个百分点。尚无作物产量记录，不能推断增产效果。' })
   session.draft=''; session.updatedAt=Date.now()
 }
 </script>

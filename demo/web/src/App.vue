@@ -35,6 +35,7 @@ const collapsed = ref(false)
 const projectPages = ['overview', 'sources', 'processing', 'generation', 'annotation', 'planning', 'versions']
 const inProject = computed(() => projectPages.includes(page.value))
 const project = computed(() => state.projects.find(p => p.id === state.activeProject))
+const visibleNotices = computed(() => state.notices.filter(text=>!text.startsWith('欢迎使用数据知识加工平台演示。')))
 const projectDatasets = computed(() => state.datasets.filter(d => d.projectId === state.activeProject && allowed('view', d.id)))
 const groups = computed(() => page.value === 'settings' ? [{ title: '用户设置', items: settingNavigation }] : inProject.value ? [{ title: '项目加工空间', items: projectItems }] : navigation)
 function ensureProjectDataset() {
@@ -87,7 +88,7 @@ onUnmounted(() => { disposed = true; window.removeEventListener('hashchange', ha
     <div class="main-shell">
       <header class="topbar">
         <div class="topbar-actions">
-          <el-popover placement="bottom-end" :width="340" trigger="click"><template #reference><el-button class="notification" text aria-label="消息"><el-badge :value="state.notices.length" :max="9"><el-icon><Bell /></el-icon></el-badge></el-button></template><h4>工作空间消息</h4><div class="notice" v-for="(text, i) in state.notices.slice(0, 8)" :key="i">{{ text }}</div></el-popover>
+          <el-popover placement="bottom-end" :width="340" trigger="click"><template #reference><el-button class="notification" text aria-label="消息"><el-badge :value="visibleNotices.length" :max="9"><el-icon><Bell /></el-icon></el-badge></el-button></template><h4>工作空间消息</h4><div class="notice" v-for="(text, i) in visibleNotices.slice(0, 8)" :key="i">{{ text }}</div></el-popover>
           <span class="top-divider"></span><div class="avatar">{{ state.role.slice(0, 1) }}</div><el-dropdown @command="handleUserCommand"><button class="user-menu"><b>{{ state.role }}</b><el-icon><ArrowDown /></el-icon></button><template #dropdown><el-dropdown-menu><el-dropdown-item command="settings"><el-icon><Setting /></el-icon>用户设置</el-dropdown-item><el-dropdown-item v-for="role in ['管理员', '加工人员', '审核人员', '数据使用者']" :key="role" :command="role">{{ role }} {{ state.role === role ? '✓' : '' }}</el-dropdown-item><el-dropdown-item divided command="reset">重置演示数据</el-dropdown-item><el-dropdown-item divided command="logout"><el-icon><Back /></el-icon>登出</el-dropdown-item></el-dropdown-menu></template></el-dropdown>
         </div>
       </header>

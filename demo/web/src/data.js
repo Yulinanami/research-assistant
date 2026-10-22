@@ -1,3 +1,5 @@
+import { ensureLifecycleGovernance, qualityFingerprint, reviseStandard, contentFieldsFor, runQualityReport, executionStandards, validateGovernance, publicationEvidence } from './domain.js'
+
 export const navigation = [
   { title: '工作空间', items: [
     { id: 'home', title: '首页', icon: 'House', subtitle: '发现科研数据，开始新的数据建设' },
@@ -64,7 +66,6 @@ export function initialData() {
     standards: [
       { id: 'std1', name: '科研资料采集规范', category: '全流程标准', description: '采集时记录标题、来源、日期和所属项目；内部数据按申请授权共享。' },
       { id: 'std2', name: '通用文档元数据', category: '元数据规范', description: '标题、作者、来源、文件类型、采集时间、数据等级。' },
-      { id: 'std3', name: '土壤环境清洗流程', category: '场景清洗流程', description: '去重 → 缺失值检查 → 采样深度范围检查 → 单位标准化。', rules: ['文档去重', '质量过滤', '格式标准化'] },
     ],
     permissions: ['管理员', '加工人员', '审核人员', '数据使用者'].map(role => ({ id: role, role, project: '全部项目', level: '内部', view: true, edit: ['管理员', '加工人员'].includes(role), review: ['管理员', '审核人员'].includes(role), download: true })),
     services: [], notices: ['欢迎使用数据知识加工平台演示。所有模型和处理任务均使用模拟结果。'],
@@ -321,5 +322,156 @@ export function addGovernanceDemoDatasets(data) {
     data.versions.push({id:`${sample.id}-v1`,datasetId:sample.id,kind:'dataset',number:1,type:'条目导入',status:'已通过',records,sourceId,created,reviewNote:'内容审核通过，发布前需完成规范检查。'})
   }
   data.governanceDemoSeeded = true
+  return data
+}
+
+
+export function addContentGovernance(data) {
+  data.fieldTemplates ||= []
+  data.qualityReports ||= []
+  if (!data.contentGovernanceSeeded) {
+    const definitions = [
+      {id:'term1',name:'采样深度',field:'sampling_depth',type:'数值',unit:'厘米',required:true,checkRange:true,min:0,max:200,description:'本项目采样位置距地表深度，允许0—200厘米。'},
+      {id:'term2',name:'土壤含水量',field:'soil_moisture',type:'数值',unit:'%',required:true,checkRange:true,min:0,max:60,description:'质量含水率；本项目检查范围0—60%，不作为所有土壤的通用物理限值。'},
+      {id:'term3',name:'采样时间',field:'sampling_time',type:'日期',required:true,description:'样品实际采集日期。'},
+      {id:'field-sample-id',name:'采样编号',field:'sample_id',type:'文本',required:true,unique:true,description:'同一数据集版本内唯一的采样记录编号。'},
+      {id:'field-question',name:'问题',field:'question',type:'文本',required:true,unique:true,description:'需要回答的问题。'},
+      {id:'field-answer',name:'回答',field:'answer',type:'文本',required:true,description:'基于来源材料给出的回答。'},
+      {id:'field-reference',name:'参考来源',field:'reference',type:'文本',required:true,description:'支撑记录内容的参考材料或出处。'},
+      {id:'field-title',name:'标题',field:'title',type:'文本',required:true,description:'文档或片段标题。'},
+      {id:'field-content',name:'正文',field:'content',type:'文本',required:true,description:'整理后的正文内容。'},
+      {id:'field-image',name:'图片',field:'image',type:'文本',required:true,description:'图片引用或图片内容。'},
+    ]
+    for (const definition of definitions) {
+      const current=data.terms.find(term=>term.id===definition.id)
+      if (current) { for (const [key,value] of Object.entries(definition)) if (current[key]===undefined) current[key]=value; current.severity ||= '阻断'; current.enabled ??= true }
+      else data.terms.push({...definition,severity:'阻断',enabled:true})
+    }
+    const templates = [
+      {id:'content-soil',name:'土壤观测记录标准',termIds:['field-sample-id','term3','term1','term2']},
+      {id:'content-qa',name:'科研问答标准',termIds:['field-question','field-answer','field-reference']},
+      {id:'content-document',name:'文档内容标准',termIds:['field-title','field-content','field-reference']},
+      {id:'content-image',name:'图片内容标准',termIds:['field-image']},
+    ]
+    for (const template of templates) if (!data.fieldTemplates.some(item=>item.id===template.id)) data.fieldTemplates.push(template)
+    const created='2026/10/22 10:40:00'
+    for (const sample of [
+      {id:'quality-demo-soil',name:'土壤观测记录（质量治理演示）',type:'结构化数据',industry:'农业科研',source:'土壤试验田采样记录',fieldTemplateId:'content-soil',records:JSON.parse(JSON.stringify(tableSamples))},
+      {id:'quality-demo-qa',name:'科研问答（质量治理演示）',type:'问答对',industry:'科研教育',source:'土壤含水量试验报告',fieldTemplateId:'content-qa',manualReviewInstructions:'核对回答是否有来源依据；材料未提供的数据不能推断为事实。',records:[{...qaSamples[0]},{...qaSamples[1],answer:''},{...qaSamples[2],reference:''}]},
+    ]) {
+      if (data.datasets.some(dataset=>dataset.id===sample.id)) continue
+      const {records,...dataset}=sample
+      data.datasets.push({...dataset,owner:data.role || '管理员',steward:data.role || '管理员',project:'数据质量治理演示',scene:sample.type==='问答对'?'科研问答检查':'采样记录检查',demand:'按字段标准定位问题，修正后复检并发布。',quality:'字段完整、类型正确、编号不重复、内容有依据',format:'JSON、CSV',scale:records.length,level:'内部',status:'建设中',downloads:0,tags:['数据质量'],introduction:sample.type==='问答对'?'包含缺失回答和缺失引用的问答记录，可检查、指派问题、回项目修正并复检；回答与来源是否一致需要人工核对。':'包含重复采样编号、负采样深度和缺失含水量的观测记录，用于演示字段字典约束、问题定位、修正和复检。',created})
+      const sourceId=`${sample.id}-source`
+      data.sources.push({id:sourceId,datasetId:sample.id,name:`${sample.name}.json`,type:'JSON',content:JSON.stringify(records,null,2),size:new TextEncoder().encode(JSON.stringify(records)).length,status:'已接入',created})
+      data.versions.push({id:`${sample.id}-v1`,datasetId:sample.id,kind:'dataset',number:1,type:'条目导入',records,sourceId,created,status:'待审核',reviewNote:''})
+    }
+    for (const dataset of data.datasets) {
+      if (dataset.id==='soil' && dataset.fieldTemplateId===undefined) dataset.fieldTemplateId='content-qa'
+      if (dataset.id==='paper' && dataset.fieldTemplateId===undefined) dataset.fieldTemplateId='content-document'
+    }
+    data.contentGovernanceSeeded=true
+  }
+  for (const dataset of data.datasets) { if (dataset.id==='quality-demo-qa' && dataset.manualReviewInstructions===undefined) dataset.manualReviewInstructions='核对回答是否有来源依据；材料未提供的数据不能推断为事实。'; dataset.steward ||= dataset.owner || '管理员'; dataset.fieldMappings ||= {}; dataset.requiresQuality ||= Boolean(dataset.fieldTemplateId) }
+  return data
+}
+
+
+const sharedContentFields={question:'field-question',answer:'field-answer',reference:'field-reference',title:'field-title',content:'field-content',image:'field-image'}
+function sameFieldConstraints(a,b) {
+  return a.field===b.field && a.type===b.type && (a.unit || '')===(b.unit || '') && ['required','unique','checkRange'].every(key=>Boolean(a[key])===Boolean(b[key])) && (a.enabled!==false)===(b.enabled!==false) && (a.severity || '阻断')===(b.severity || '阻断') && (!a.checkRange || a.min===b.min && a.max===b.max) && (a.allowedValues || '')===(b.allowedValues || '')
+}
+function mergeSampleDictionary(data) {
+  const affected=new Set()
+  const currentReports=new Map(data.versions.map(version=>[version.id,data.qualityReports.find(report=>report.versionId===version.id)?.fingerprint===qualityFingerprint(data,version)]))
+  for (const term of [...data.terms]) {
+    const dataset=data.datasets.find(item=>term.id===`${item.id}-field-${term.field}` && item.id.startsWith('industry-'))
+    if (!dataset || (term.revision || 1)!==1 || term.description!==`${dataset.name}中的${term.name}。`) continue
+    const canonical=data.terms.find(item=>item.id===sharedContentFields[term.field])
+    if (canonical && sameFieldConstraints(term,canonical)) {
+      for (const template of data.fieldTemplates.filter(item=>item.termIds.includes(term.id))) {
+        reviseStandard(data,'fieldTemplates',template.id,{...template,termIds:[...new Set(template.termIds.map(id=>id===term.id?canonical.id:id))]},'内置字典合并')
+        data.datasets.filter(item=>item.fieldTemplateId===template.id).forEach(item=>affected.add(item.id))
+      }
+      data.terms.splice(data.terms.indexOf(term),1)
+    } else if (term.field==='label' && term.name==='分类标签') {
+      reviseStandard(data,'terms',term.id,{...term,name:`${dataset.industry}分类标签`,description:`${dataset.scene}使用的分类标签。`},'内置字典合并')
+      data.datasets.filter(item=>data.fieldTemplates.find(template=>template.id===item.fieldTemplateId)?.termIds.includes(term.id)).forEach(item=>affected.add(item.id))
+    }
+  }
+  // Preserve old report and publication snapshots; only recheck unchanged sample content.
+  for (const version of data.versions.filter(item=>affected.has(item.datasetId) && currentReports.get(item.id))) {
+    const report=runQualityReport(data,version)
+    report.operator='内置字典合并复检';report.sampleRecord=true
+  }
+}
+
+export function seedGovernanceExamples(data) {
+  const labels={title:['事项标题','文本',''],content:['原始文本','文本',''],label:['分类标签','文本',''],question:['问题','文本',''],answer:['回答','文本',''],reference:['参考来源','文本',''],image:['图片引用','文本',''],equipment_id:['设备编号','文本',''],temperature:['设备温度','数值','℃'],vibration:['振动速度','数值','mm/s'],timestamp:['观测时间','日期',''],power_kw:['发电功率','数值','kW'],irradiance:['太阳辐照度','数值','W/㎡'],station_id:['监测站编号','文本',''],ph:['酸碱度','数值',''],dissolved_oxygen:['溶解氧','数值','mg/L']}
+  const users=['lin_xiao_047','zhou_yan_126','chen_mo_083']
+  for (const [index,dataset] of data.datasets.filter(item=>/^industry-(health|finance|industry|traffic|energy|retail|education|agriculture|environment|government)$/.test(item.id)).entries()) {
+    if (dataset.governanceExamplesSeeded) continue
+    const versions=data.versions.filter(item=>item.datasetId===dataset.id && item.status==='已发布' && (item.id===`${dataset.id}-v1` || item.id.startsWith(`sample-${dataset.id}-`)))
+    if (!versions.length) continue
+    const actor=dataset.publisherId || dataset.owner
+    const first=versions[0]
+    if (!dataset.fieldTemplateId) {
+      const termIds=[]
+      for (const field of Object.keys(first.records[0] || {}).filter(key=>labels[key])) {
+        const [name,type,unit]=labels[field],id=`${dataset.id}-field-${field}`
+        const values=[...new Set(versions.flatMap(version=>version.records.map(record=>record[field])).filter(value=>value!==undefined))]
+        const definition={id,field,name,type,unit,required:true,enabled:true,severity:'阻断',revision:1,unique:['question','station_id','equipment_id'].includes(field),description:`${dataset.name}中的${name}。`}
+        if (field==='label') {definition.allowedValues=values.join('，');definition.name=`${dataset.industry}分类标签`;definition.description=`${dataset.scene}使用的分类标签。`}
+        if (field==='ph') Object.assign(definition,{checkRange:true,min:0,max:14})
+        if (['dissolved_oxygen','power_kw','irradiance','vibration'].includes(field)) Object.assign(definition,{checkRange:true,min:0,max:field==='dissolved_oxygen'?30:100000})
+        const canonical=data.terms.find(item=>item.id===sharedContentFields[field])
+        if (canonical && sameFieldConstraints(definition,canonical)) termIds.push(canonical.id)
+        else {if (!data.terms.some(item=>item.id===id)) data.terms.push(definition);termIds.push(id)}
+      }
+      const id=`${dataset.id}-content-standard`
+      if (!data.fieldTemplates.some(item=>item.id===id)) data.fieldTemplates.push({id,name:`${dataset.industry}${dataset.type}字段标准`,termIds,revision:1})
+      dataset.fieldTemplateId=id
+      dataset.requiresQuality=true
+    }
+    ensureLifecycleGovernance({...data,datasets:[dataset]})
+    for (const version of versions) {
+      const published=version.release.publishedAt
+      const base=Date.parse(published.replaceAll('/','-').replace(' ','T'))
+      const at=minutes=>{const date=new Date(base+minutes*60000);return `${date.getFullYear()}/${String(date.getMonth()+1).padStart(2,'0')}/${String(date.getDate()).padStart(2,'0')} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}:00`}
+      const sourceId=`sample-governance-source-${version.id}`
+      if (version.sourceId===`${dataset.id}-source`) {
+        if (!data.sources.some(item=>item.id===sourceId)) data.sources.push({id:sourceId,datasetId:dataset.id,name:`${dataset.name}-${version.release.tag}-原始资料.json`,type:'JSON',status:'已接入',content:JSON.stringify(version.records,null,2),size:new TextEncoder().encode(JSON.stringify(version.records)).length,created:at(-180),createdBy:actor})
+        version.sourceId=sourceId
+      }
+      const taskId=`sample-governance-task-${version.id}`
+      if (!data.tasks.some(item=>item.id===taskId)) data.tasks.push({id:taskId,datasetId:dataset.id,sourceId:version.sourceId,versionId:version.id,name:`${dataset.industry} · ${version.release.tag} · 字段整理与校验`,type:dataset.type==='图片'?'图片分类标注':dataset.type==='问答对'?'问答整理':'字段标准化',status:'已完成',progress:100,created:at(-120),operator:actor,logs:['读取该版本来源资料','按绑定字段标准整理记录','输出独立数据集版本']})
+      if (!data.qualityReports.some(item=>item.versionId===version.id) && contentFieldsFor(data,dataset).length) {
+        const report=runQualityReport(data,version)
+        report.created=at(-60);report.operator=actor;report.sampleRecord=true
+      }
+      version.reviewed ||= at(-30)
+      version.reviewedBy ||= actor
+      for (const [operation,stage,offset] of [['import','采集',-170],['save','存储',-90],['publish','发布',-15]]) {
+        const id=`sample-governance-${operation}-${version.id}`
+        if (data.governanceChecks.some(item=>item.versionId===version.id && item.operation===operation)) continue
+        const issues=validateGovernance(data,operation,{dataset,versionId:version.id,file:{name:'资料.json',size:512,type:'application/json'}})
+        const standards=executionStandards(data,dataset,operation).map(standard=>({...standard,result:standard.executionMode==='后端保障'?'待后端落实':issues.some(issue=>issue.ruleId===standard.id || standard.field && issue.field===standard.field)?'未通过':standard.executionMode==='人工确认'?'待确认':'通过'}))
+        data.governanceChecks.push({id,datasetId:dataset.id,code:dataset.code,name:dataset.name,versionId:version.id,sourceId:version.sourceId,operation,stage,operator:actor,created:at(offset),status:issues.some(issue=>issue.action==='阻止操作')?'未通过':standards.some(item=>item.executionMode==='后端保障')?'待后端保障':'通过',issues,standards,sampleRecord:true})
+      }
+      if (!version.release.evidence) version.release.evidence={...publicationEvidence(data,version,actor),created:at(-15),basis:'内置样例发布记录'}
+      if (!data.requests.some(item=>item.versionId===version.id && item.applicant===users[index%users.length])) data.requests.push({id:`sample-governance-request-${version.id}`,datasetId:dataset.id,versionId:version.id,user:users[index%users.length],applicant:users[index%users.length],department:`${dataset.industry}应用研究组`,reason:`用于${dataset.scene}，仅在课题组内分析，不转发原始记录。`,status:'已通过',created:at(90),approved:at(180),approvedBy:actor,note:`同意用于${dataset.scene}；授权限定${version.release.tag}。`,sampleRecord:true})
+      if (!data.usageEvents.some(item=>item.id===`sample-governance-use-${version.id}`)) data.usageEvents.push({id:`sample-governance-use-${version.id}`,datasetId:dataset.id,versionId:version.id,user:users[index%users.length],action:'下载',status:'已发起',detail:`下载${version.release.tag} JSON文件，用于${dataset.scene}`,created:at(240),sampleRecord:true})
+    }
+    if (!data.storageEvents.some(item=>item.datasetId===dataset.id)) data.storageEvents.push({id:`sample-governance-storage-${dataset.id}`,datasetId:dataset.id,action:'存储登记',operator:actor,note:`按${data.storagePolicies.find(item=>item.id===dataset.storagePolicyId)?.name}保留JSON版本与来源资料，全部历史版本可追溯。`,created:versions[0].created,sampleRecord:true})
+    dataset.governanceExamplesSeeded=true
+  }
+  for (const version of data.versions.filter(item=>item.status==='已发布' && /^industry-/.test(item.datasetId) && (item.id===`${item.datasetId}-v1` || item.id.startsWith(`sample-${item.datasetId}-`)))) {
+    const id=`sample-manual-review-${version.id}`
+    if (data.manualConfirmations.some(item=>item.id===id)) continue
+    const dataset=data.datasets.find(item=>item.id===version.datasetId)
+    const definition={id:'sample-publication-review',name:'发布内容人工核对',revision:1,category:'全流程标准',executionMode:'人工确认',stages:['共享']}
+    data.manualConfirmations.push({id,standardId:definition.id,revision:1,datasetId:dataset.id,versionId:version.id,operator:version.reviewedBy || version.release.publisher,created:version.reviewed || version.release.publishedAt,note:`已核对${version.release.tag}的${dataset.type}内容、来源及字段，${version.reviewNote || '内容审核通过'}。`,definition,sampleRecord:true})
+  }
+  mergeSampleDictionary(data)
   return data
 }
