@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { effectiveAnswer, editAnswerRecord, reviewInput, classificationDraft, recordAnnotationTask } from '../src/annotation.js'
+import { effectiveAnswer, editAnswerRecord, reviewInput, classificationDraft, recordAnnotationTask, validateQuestions, validateBoxes } from '../src/annotation.js'
 import { exportDatasetRecords } from '../src/workspace.js'
 
 test('编辑当前生效答案后预览与导出一致，同时保留原回答和原始记录', () => {
@@ -54,4 +54,28 @@ test('恢复分类草稿按数据集和类型隔离，明确交接的清洗输�
   assert.equal(classificationDraft(versions, 'a', 'image', ['clean-0']).id, 'clean-image')
   assert.equal(classificationDraft(versions, 'a', 'image', ['new-clean-0']), undefined)
   assert.equal(classificationDraft(versions, 'a', 'text').id, 'text')
+})
+
+test('问答提交检查回答、质量枚举和评分范围；草稿允许尚未确认的记录', () => {
+  assert.doesNotThrow(() => validateQuestions([{ question: '问题', answer: '', rating: 0 }]))
+  assert.throws(() => validateQuestions([{ question: '问题', answer: '答案', label: '任意标签' }]), /未定义/)
+  assert.throws(() => validateQuestions([{ question: '问题', answer: '答案', rating: NaN }]), /评分/)
+  assert.throws(() => validateQuestions([{ question: '问题', answer: '', label: '可用' }], undefined, true), /回答为空/)
+  assert.doesNotThrow(() => validateQuestions([{ question: '问题', answer: '原文', correctedAnswer: '修订', label: '可用', rating: 5 }], undefined, true))
+})
+
+test('图片区域拒绝负数、非有限值、空区域、越界和模板外类别', () => {
+  const valid = { x: 10, y: 10, width: 20, height: 20, label: '图' }
+  for (const changes of [{ x: -1 }, { y: Infinity }, { width: 0 }, { height: -1 }, { width: 91 }, { label: '未知' }]) {
+    assert.throws(() => validateBoxes([{ ...valid, ...changes }], ['图']))
+  }
+  assert.doesNotThrow(() => validateBoxes([valid], ['图']))
+})
+
+test('仅人工可用范围不混入未复核、需修改、不可用或已过滤条目，默认保留原始导出行为', () => {
+  const records = ['可用', '需修改', '不可用', '无法判断', ''].map(label => ({ question: label || '未复核', answer: '原答案', correctedAnswer: '人工答案', label }))
+  records.push({ question: '已过滤', answer: '答案', label: '可用', status: '过滤' })
+  assert.equal(exportDatasetRecords(records, '原始结构').length, 5)
+  assert.deepEqual(exportDatasetRecords(records, 'Alpaca', { quality: 'usable' }), [{ instruction: '可用', input: '', output: '人工答案' }])
+  assert.equal(records.length, 6)
 })

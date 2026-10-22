@@ -3,9 +3,12 @@ import { ElMessage } from 'element-plus'
 import { initialData, qaSamples, researchText, imageCleaningSamples } from './data'
 import { uid, now, createVersion, canDownload, submitVersionReview, reviewVersion, publishVersion, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords } from './domain'
 import { cleanBatch, resultContent, parserType, chunkRecords } from './workflow'
-import { migrateWorkspace } from './workspace'
+import { migrateWorkspace, generationInputs } from './workspace'
+import { questionEntries } from './annotation'
 import { auth } from './auth'
 import { parseEntries } from './imports'
+import { finishTaskTracking } from './tasks'
+import { extractKnowledgeGraph } from './knowledgeGraph'
 
 export const state = reactive(migrateWorkspace(initialData()))
 export const storage = reactive({ ready: false, error: '', saving: false })
@@ -39,6 +42,7 @@ export async function initialize() {
     for (const task of state.tasks) {
       if (task.status === '执行中') {
         task.status = '失败'; task.logs.push('页面刷新中断了模拟任务，请重试。')
+        task.completedAt = Date.now()
         const source = state.sources.find(item => item.id === task.sourceId && item.datasetId === task.datasetId)
         if (task.type.includes('解析') && source) source.status = '解析失败'
       }
@@ -110,6 +114,19 @@ export function runTask(config) {
   state.tasks.unshift(task)
   task = state.tasks[0]
   const inputSource = state.sources.find(source => source.id === task.sourceId && source.datasetId === task.datasetId)
+  const inputVersion = state.versions.find(version => version.id === task.sourceId && version.datasetId === task.datasetId)
+  task.startedAt = Date.now()
+  delete task.completedAt
+  task.totalItems = task.config?.pipeline ? task.config.inputs?.length || 0
+    : inputVersion ? inputVersion.records.filter(record => record.status !== '过滤').length : inputSource ? 1 : 0
+  task.processedItems = 0; task.succeededItems = 0; task.failedItems = 0
+  task.modelName = state.models.find(model => model.id === task.config?.model)?.name || ''
+  const snapshot = value => value ? JSON.parse(JSON.stringify(value)) : null
+  const sourceSnapshot = snapshot(inputSource)
+  const versionSnapshot = snapshot(inputVersion)
+  task.inputSnapshot = sourceSnapshot || versionSnapshot
+  const generationTypes = ['知识片段', '知识图谱', '问答生成', '问答增强', '图片描述', '图片问答']
+  const compatibleInput = !generationTypes.includes(task.type) || generationInputs(task.type, state.sources, state.versions, task.datasetId).some(input => input.id === task.sourceId)
   if (task.type.includes('解析') && inputSource) inputSource.status = '解析中'
   const current = generation
   for (const [delay, progress, message] of [[500, 40, '正在处理输入内容'], [1000, 75, '正在整理输出'], [1500, 100, '处理完成（模拟）']]) {
@@ -120,13 +137,24 @@ export function runTask(config) {
       task.logs.push(message)
       if (progress === 100) {
         if (task.fail) { task.status = '失败'; if (task.type.includes('解析') && inputSource) inputSource.status = '解析失败'; task.logs.push('模拟失败：输入文档不可读取。取消模拟失败后可重试。'); finishFlowTask(task); return }
-        const previousVersion = state.versions.find(v => v.id === task.sourceId && v.datasetId === task.datasetId)
-        const source = state.sources.find(s => s.id === task.sourceId && s.datasetId === task.datasetId) || (previousVersion ? { name: isDatasetVersion(previousVersion) ? `V${previousVersion.number} · ${previousVersion.type}` : previousVersion.type, content: resultContent(previousVersion.records) } : null)
+        const previousVersion = versionSnapshot
+        const source = sourceSnapshot || (previousVersion ? { name: isDatasetVersion(previousVersion) ? `V${previousVersion.number} · ${previousVersion.type}` : previousVersion.type, content: resultContent(previousVersion.records) } : null)
         if (!task.config?.pipeline && !source && task.type !== '图片清洗') {
           task.status = '失败'; task.logs.push('输入资料不存在或不属于本数据集，请重新选择输入'); finishFlowTask(task); return
         }
+        if (!compatibleInput) { task.status = '失败'; task.logs.push('输入内容为空、已过滤或不符合本次任务的数据类型'); finishFlowTask(task); return }
+        if (['问答生成', '问答增强', '图片描述', '图片问答', '自动标注'].includes(task.type)
+          && !state.models.some(model => model.id === task.config?.model && model.status === '已上架')) {
+          task.status = '失败'; task.logs.push('请选择已上架的模型'); finishFlowTask(task); return
+        }
         let records
-        if (task.config?.pipeline) {
+        if (task.type === '知识图谱') {
+          try {
+            const graph = extractKnowledgeGraph(previousVersion || {...source,id:task.sourceId},task.config || {})
+            records = [{title:source.name || '知识图谱', sourceId:task.sourceId, knowledge_graph:graph}]
+            task.logs.push(`本地演示抽取 ${graph.entities.length} 个实体、${graph.relationships.length} 条候选关系，等待人工校订；未调用 LightRAG 服务。`)
+          } catch (error) {task.status='失败';task.logs.push(error.message);finishFlowTask(task);return}
+        } else if (task.config?.pipeline) {
           try {
             records = cleanBatch(task.config.inputs, task.config)
             task.logs.push(`按顺序执行：${task.config.rules.join(' → ') || '保留全部内容'}`)
@@ -138,12 +166,25 @@ export function runTask(config) {
           if (!records.length) { task.status = '失败'; task.logs.push('输入没有可用于切片的正文条目'); finishFlowTask(task); return }
         } else if (['问答生成', '问答增强', '图片问答'].includes(task.type)) {
           records = structuredClone(qaSamples)
+          if (task.type === '图片问答') {
+            const images = sourceSnapshot?.content?.startsWith('data:image/')
+              ? [{ image: sourceSnapshot.content, title: sourceSnapshot.name, sourceId: sourceSnapshot.id }]
+              : previousVersion.records.filter(record => record.status !== '过滤' && record.image?.startsWith('data:image/'))
+            records = images.flatMap((image, index) => structuredClone(qaSamples).map(record => ({ ...record,
+              image: image.image, title: image.title || source.name, sourceId: image.sourceId || task.sourceId,
+              inputId: task.sourceId, sourceRecordIndex: index })))
+          }
           if (task.type === '问答增强') {
             if (!previousVersion?.records.some(record => record.question)) { task.status = '失败'; task.logs.push('问答增强需要本数据集的问答成果'); finishFlowTask(task); return }
             records = augmentRecords(previousVersion.records, task.config?.audience)
           }
         } else if (task.type === '图片描述') {
-          records = [{ content: '图中比较A组与B组的土壤含水量，分别为20%和25%，B组高5个百分点。', source: source?.name }]
+          const images = sourceSnapshot?.content?.startsWith('data:image/')
+            ? [{ image: sourceSnapshot.content, title: sourceSnapshot.name, sourceId: sourceSnapshot.id }]
+            : previousVersion.records.filter(record => record.status !== '过滤' && record.image?.startsWith('data:image/'))
+          records = images.map((image, index) => ({ image: image.image, title: image.title || source.name,
+            content: '图中比较A组与B组的土壤含水量，分别为20%和25%，B组高5个百分点。', source: image.title || source.name,
+            sourceId: image.sourceId || task.sourceId, inputId: task.sourceId, sourceRecordIndex: index }))
         } else if (task.type === '文本清洗') {
           if (!source?.content?.trim() || source.content.startsWith('data:')) { task.status = '失败'; task.logs.push('输入没有可清洗正文'); finishFlowTask(task); return }
           let text = source.content
@@ -162,19 +203,20 @@ export function runTask(config) {
           task.logs.push(`输入${records.length}张，保留${kept}张，过滤${records.length - kept}张；原始图片未修改。`)
           task.logs.push('质量与尺寸为演示信息；格式与尺寸标准化仅展示配置结果，未转换图片文件。')
         } else if (task.type === '自动标注') {
-          if (!previousVersion?.records.some(record => record.question)) { task.status = '失败'; task.logs.push('自动标注需要本数据集的问答成果'); finishFlowTask(task); return }
-          records = JSON.parse(JSON.stringify(previousVersion.records)).map((r, i) => ({ ...r, suggestion: i === 2 ? '需修改' : '可用', label: '', rating: 0 }))
+          if (!questionEntries(previousVersion).records.length) { task.status = '失败'; task.logs.push('自动标注需要本数据集的问答成果'); finishFlowTask(task); return }
+          records = JSON.parse(JSON.stringify(previousVersion.records)).map((r, i) => r.status === '过滤' || !r.question ? r : ({ ...r, suggestion: i === 2 ? '需修改' : '可用', suggestionModelId: task.config.model }))
         } else {
           if (!inputSource || parserType(inputSource) !== task.type) { task.status = '失败'; task.logs.push('解析类型与输入资料不匹配'); finishFlowTask(task); return }
           records = [{ title: source?.name, content: researchText, source: source?.name, format: task.config?.format || 'Markdown', table: 'A组 | 20%\nB组 | 25%', formula: 'w = m_water / m_dry × 100%', image: '土壤含水量对比图' }]
         }
         const version = addVersion(task.datasetId, records, task.type, task.sourceId)
+        if (sourceSnapshot) version.sourceRevision = sourceSnapshot.revision || 0
         if (task.sourceIds) version.sourceIds = [...task.sourceIds]
-        if (task.type.includes('解析') && inputSource) inputSource.parsedVersionId = version.id
+        if (task.type.includes('解析') && inputSource && (inputSource.revision || 0) === (sourceSnapshot.revision || 0)) inputSource.parsedVersionId = version.id
         task.versionId = version.id
         task.logs.push(isDatasetVersion(version) ? `已保存数据集V${version.number}，共${records.length}条，原版本保持不变。` : '已保存加工成果，不新增数据集版本。')
         task.status = '已完成'
-        if (source && !task.config?.pipeline) source.status = task.type.includes('解析') ? '已解析' : '已处理'
+        if (inputSource && !task.config?.pipeline && (inputSource.revision || 0) === (sourceSnapshot.revision || 0)) inputSource.status = task.type.includes('解析') ? '已解析' : '已处理'
         notify(`${task.type}已完成，结果已保存到项目成果`)
         finishFlowTask(task)
       }
@@ -214,6 +256,7 @@ function launchFlowStep(flow) {
   step.taskId=task.id;flow.taskIds.push(task.id)
 }
 function finishFlowTask(task) {
+  finishTaskTracking(task)
   if (!task.flowRunId) return
   const flow = state.flows.find(item=>item.id===task.flowRunId)
   if (!flow || flow.status !== '执行中' || flow.steps[flow.index]?.taskId !== task.id) return
@@ -230,11 +273,20 @@ export function retryProjectFlow(id) {
   flow.status='执行中';flow.error='';launchFlowStep(flow)
 }
 
+export function removeTaskRecord(id) {
+  const task = state.tasks.find(item => item.id === id)
+  if (!task || !requireAction('edit', task.datasetId)) return false
+  if (task.status === '执行中' || state.flows.some(flow => flow.id === task.flowRunId && flow.status === '执行中')) throw new Error('执行中的任务或流程记录不能删除')
+  state.tasks.splice(state.tasks.indexOf(task), 1)
+  return true
+}
+
 export async function importFile(file, datasetId = state.activeDataset) {
   const type = file.name.split('.').pop().toUpperCase()
   let content = ''
   if (/^(TXT|CSV|JSON|JSONL|MD|HTML|XML|YAML)$/.test(type)) content = await file.text()
-  if (file.type.startsWith('image/')) content = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file) })
+  const imageMime = { PNG: 'image/png', JPG: 'image/jpeg', JPEG: 'image/jpeg', SVG: 'image/svg+xml', GIF: 'image/gif', WEBP: 'image/webp', BMP: 'image/bmp', AVIF: 'image/avif' }
+  if (file.type.startsWith('image/') || imageMime[type]) content = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file.type.startsWith('image/') ? file : new Blob([file], { type: imageMime[type] })) })
   if (!requireAction('edit', datasetId)) throw new Error('没有导入权限')
   const records = ['JSON', 'JSONL'].includes(type) ? parseEntries(content, type.toLowerCase()) : null
   const source = { id: uid('src'), datasetId, projectId: state.datasets.find(d => d.id === datasetId)?.projectId || '', name: file.name, type, content, size: file.size, status: '待处理', created: now(), hasFile: true }
@@ -247,6 +299,25 @@ export async function importFile(file, datasetId = state.activeDataset) {
     source.status = '已接入'
   }
   return source
+}
+
+export function updateSource(source, changes) {
+  if (!requireAction('edit', source.datasetId)) return false
+  const changed = changes.content !== undefined && changes.content !== source.content
+  const records = changed && ['JSON', 'JSONL'].includes(source.type) ? parseEntries(changes.content, source.type.toLowerCase()) : null
+  Object.assign(source, changes)
+  if (changed) {
+    source.revision = (source.revision || 0) + 1
+    delete source.parsedVersionId
+    source.status = '待处理'
+    if (records) {
+      const version = addVersion(source.datasetId, records, '条目导入', source.id)
+      version.sourceRevision = source.revision
+      source.importedVersionId = version.id
+      source.status = '已接入'
+    }
+  }
+  return true
 }
 export function saveDownload(content, name, type = 'application/json;charset=utf-8') {
   const blob = content instanceof Blob ? content : new Blob([content], { type })

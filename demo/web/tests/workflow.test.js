@@ -55,3 +55,23 @@ test('图片流水线在同一批中保留正常样本，过滤重复、低分�
   assert.deepEqual(results[0].after, { width: 600, height: 333, format: 'PNG' })
   assert.equal(inputs[0].width, 900)
 })
+
+test('源资料修订后不能自动复用旧解析或过滤正文，明确新修订后才可交给清洗', () => {
+  const source = { id: 'paper', datasetId: 'a', type: 'PDF', revision: 1, parsedVersionId: 'old' }
+  const old = { id: 'old', datasetId: 'a', sourceId: 'paper', type: 'PDF解析', records: [{ content: '旧正文' }] }
+  assert.equal(preparationInputs([source], [old], 'a')[0].ready, false)
+  const current = { ...old, id: 'current', sourceRevision: 1, records: [{ content: '新正文' }, { content: '不可用段落', status: '过滤' }] }
+  const result = preparationInputs([source], [current, old], 'a')[0]
+  assert.equal(result.content, '新正文')
+  assert.equal(result.ready, true)
+})
+
+test('图片清洗的步骤顺序生效：先缩小再质量筛选与先筛选再缩小的结果不同', () => {
+  const input = [{ id: 'image', originId: 'raw-image', kind: 'image', name: '图片', content: 'data:image/png;base64,AA', width: 900, height: 600, clarity: 90 }]
+  const config = { type: '图片清洗', minWidth: 300, minHeight: 200, minClarity: 60, maxWidth: 100, maxHeight: 100 }
+  assert.equal(cleanBatch(input, { ...config, rules: ['格式标准化', '质量筛选'] })[0].status, '过滤')
+  const kept = cleanBatch(input, { ...config, rules: ['质量筛选', '格式标准化'] })[0]
+  assert.equal(kept.status, '保留')
+  assert.equal(kept.originId, 'raw-image')
+  assert.equal(kept.simulated, true)
+})

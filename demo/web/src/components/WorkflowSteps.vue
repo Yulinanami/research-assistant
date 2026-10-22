@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { workflowSteps } from '../workflow'
 const props = defineProps({ page: String })
 defineEmits(['navigate'])
-const activePage = computed(() => props.page === 'annotation' ? 'generation' : props.page)
+const activePage = computed(() => ({ annotation:'generation', cleaning:'processing' })[props.page] || props.page)
 const index = computed(() => workflowSteps.findIndex(step => step.page === activePage.value))
 </script>
 

@@ -59,5 +59,17 @@ test('分类可从空上下文或其它项目进入；明确选择的清洗结�
   assert.deepEqual(classificationInputs('text',sources,versions,'a',{datasetId:'a',inputIds:['filtered']}),[])
   assert.deepEqual(classificationInputs('image',sources,versions,'a',undefined),[])
   const images=[...sources,{id:'image',datasetId:'a',type:'PNG',name:'图片',content:'data:image/png;base64,AA'}]
-  assert.equal(classificationInputs('image',images,versions,'a',{datasetId:'a',inputIds:['filtered']})[0].sourceId,'image')
+  assert.deepEqual(classificationInputs('image',images,versions,'a',{datasetId:'a',inputIds:['filtered']}),[])
+})
+
+test('明确选择原资料时不会混入无关导入条目，多个交接输入只汇集所选记录', () => {
+  const sources = [{ id: 'raw', datasetId: 'a', type: 'TXT', content: '选中正文', name: '原资料' }]
+  const versions = [
+    { id: 'unrelated', datasetId: 'a', type: '条目导入', records: [{ content: '无关内容' }] },
+    { id: 'clean-a', datasetId: 'a', type: '文本清洗', records: [{ content: '内容甲' }] },
+    { id: 'clean-b', datasetId: 'a', type: '文本清洗', records: [{ content: '内容乙' }] },
+  ]
+  assert.deepEqual(classificationInputs('text', sources, versions, 'a', { datasetId: 'a', inputIds: ['raw'] }).map(record => record.content), ['选中正文'])
+  assert.deepEqual(classificationInputs('text', sources, versions, 'a', { datasetId: 'a', inputIds: ['clean-a', 'clean-b'] }).map(record => record.content), ['内容甲', '内容乙'])
+  assert.deepEqual(classificationInputs('text', sources, versions, 'a', { datasetId: 'a', inputIds: ['missing'] }), [])
 })

@@ -25,7 +25,7 @@ export function logoutDemo() {
 
 export function resolveSessionPage(requested, authenticated, pageIds) {
   if (!authenticated) return 'home'
-  const aliases = { annotation: 'generation', models: 'settings', statistics: 'workbench', review: 'audit' }
+  const aliases = { annotation: 'generation', cleaning: 'processing', 'project-tasks': 'task-center', models: 'settings', statistics: 'workbench', review: 'audit' }
   const page = aliases[requested] || requested
   return pageIds.includes(page) ? page : 'workbench'
 }

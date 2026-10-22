@@ -21,6 +21,12 @@
 .project-context b { display: block; color: #3d587b; font-size: 13px; }
 .project-context-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .project-context-actions .el-select { width: 200px; }
+.flow-config-entry .el-icon { margin-right: 5px; }
+.project-flow-config > .muted { margin-bottom: 22px; line-height: 1.8; }
+.project-flow-config .el-select { width: 100%; }
+.project-flow-config .el-checkbox-group { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.project-flow-config .el-checkbox { margin-right: 0; }
+.project-flow-config .pipeline-note { margin: 0 0 22px; }
 .recommend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
 .recommend-card { border: 1px solid #e7edf6; border-radius: 10px; background: #fbfcff; padding: 23px; }
 .recommend-card h3 { margin: 18px 0 10px; font-size: 16px; color: #3b5271; }

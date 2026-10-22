@@ -20,11 +20,21 @@ export function createVersion(versions, datasetId, records, type, sourceId = '',
 
 export function augmentRecords(records, audience) {
   const originals = JSON.parse(JSON.stringify(records))
-  const enhanced = originals.filter(r => r.question).map(r => {
+  const enhanced = originals.filter(r => r.question && r.status !== '过滤').map(r => {
     const { correctedAnswer, suggestion, ...record } = r
-    return { ...record, question: `请向${audience || '科研人员'}说明：${r.question}`, answer: correctedAnswer?.trim() || r.answer, label: '', rating: 0 }
+    const baseQuestion = r.augmentation?.baseQuestion || r.question.replace(/^(?:请向[^：\n]{1,80}说明：)+/u, '')
+    return { ...record, question: `请向${audience || '科研人员'}说明：${baseQuestion}`, answer: correctedAnswer?.trim() || r.answer,
+      augmentation: { baseQuestion, audience: audience || '科研人员' }, label: '', rating: 0 }
   })
-  return [...originals, ...enhanced]
+  const keyOf = record => JSON.stringify([record.question, record.correctedAnswer?.trim() || record.answer, record.content, record.image, record.status])
+  const seen = new Set(originals.map(keyOf))
+  const additions = enhanced.filter(record => {
+    const key = keyOf(record)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  return [...originals, ...additions]
 }
 
 export function submitVersionReview(version, submitter = '') {
@@ -62,10 +72,14 @@ export function publishVersion(version, details = {}, versions = [], publisher =
 }
 
 export function splitText(text, config) {
-  const size = Math.max(1, Number(config.size) || 180)
+  const size = Math.max(1, Math.floor(Number(config.size) || 180))
   const separator = (config.separator || '\\n\\n').replace(/\\n/g, '\n').replace(/\\t/g, '\t')
   const parts = config.chunkType === '分隔符' && separator ? text.split(separator) : [text]
-  return parts.flatMap(part => Array.from({ length: Math.ceil(part.length / size) }, (_, i) => part.slice(i * size, (i + 1) * size))).filter(s => s.trim())
+  const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null
+  return parts.flatMap(part => {
+    const characters = segmenter ? Array.from(segmenter.segment(part), entry => entry.segment) : Array.from(part)
+    return Array.from({ length: Math.ceil(characters.length / size) }, (_, i) => characters.slice(i * size, (i + 1) * size).join(''))
+  }).filter(s => s.trim())
 }
 
 export function cleanText(text, rules) {
@@ -86,20 +100,30 @@ export function exportRecords(records) {
 
 export function cleanImages(images, config) {
   const rules = config.rules || []
-  const seen = new Set()
+  const seenByStep = new Map()
   return images.map(image => {
     let reason = ''
-    if (rules.includes('重复图片去重') && seen.has(image.content)) reason = '重复图片'
-    else if (rules.includes('质量筛选')) {
-      if (image.width < config.minWidth || image.height < config.minHeight) reason = '分辨率低于阈值'
-      else if (image.clarity < config.minClarity) reason = '清晰度低于阈值'
+    let width = image.width, height = image.height, format = image.format
+    for (const [index, rule] of rules.entries()) {
+      if (rule === '重复图片去重') {
+        if (!seenByStep.has(index)) seenByStep.set(index, new Set())
+        const seen = seenByStep.get(index)
+        if (seen.has(image.content)) reason = '重复图片'
+        else seen.add(image.content)
+      } else if (rule === '质量筛选') {
+        if (width < config.minWidth || height < config.minHeight) reason = '分辨率低于阈值'
+        else if (image.clarity < config.minClarity) reason = '清晰度低于阈值'
+      } else if (rule === '格式标准化') {
+        const scale = Math.min(1, (config.maxWidth || 1024) / width, (config.maxHeight || 1024) / height)
+        width = Math.max(1, Math.round(width * scale))
+        height = Math.max(1, Math.round(height * scale))
+        format = config.imageFormat || 'PNG'
+      }
+      if (reason) break
     }
-    if (!reason) seen.add(image.content)
-    const standardize = rules.includes('格式标准化')
-    const scale = standardize ? Math.min(1, (config.maxWidth || 1024) / image.width, (config.maxHeight || 1024) / image.height) : 1
-    return { title: image.name, image: image.content, source: image.name, sourceId: image.id || '', status: reason ? '过滤' : '保留', reason: reason || '符合所选规则', clarity: image.clarity,
+    return { title: image.name, image: image.content, source: image.name, sourceId: image.id || '', originId: image.originId, status: reason ? '过滤' : '保留', reason: reason || '符合所选规则', clarity: image.clarity,
       before: { width: image.width, height: image.height, format: image.format },
-      after: reason ? null : { width: Math.max(1, Math.round(image.width * scale)), height: Math.max(1, Math.round(image.height * scale)), format: standardize ? config.imageFormat || 'PNG' : image.format },
+      after: reason ? null : { width, height, format },
       simulated: true }
   })
 }

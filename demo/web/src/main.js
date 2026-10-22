@@ -5,6 +5,7 @@ import { House, FolderOpened, UploadFilled, SetUp, List, MagicStick, EditPen, Cp
 import 'element-plus/dist/index.css'
 import './style.css'
 import './workspace.css'
+import './knowledgeGraph.css'
 import App from './App.vue'
 
 const app = createApp(App)

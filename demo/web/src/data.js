@@ -2,7 +2,6 @@ export const navigation = [
   { title: '工作空间', items: [
     { id:'workbench', title:'工作台', icon:'DataAnalysis', subtitle:'从项目出发，查看任务、待办与数据统计' },
     { id:'projects', title:'数据加工', icon:'SetUp', subtitle:'以项目为单位组织资料、加工任务与数据成果' },
-    { id:'project-tasks', title:'加工任务', icon:'List', subtitle:'统一跟踪各项目的加工任务、运行进度与预设流程' },
     { id:'mydatasets', title:'我的数据集', icon:'Files', subtitle:'查看本人拥有的数据集，打开项目继续建设' },
   ] },
   { title:'数据治理与共享', items:[
