@@ -1,12 +1,20 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { state, saveStandard, confirmStandard, checkGovernance, requireAction, notify, allowed } from '../store'
-import { uid, isDatasetVersion } from '../domain'
+import { state, saveStandard, confirmStandard, checkGovernance, requireAction, notify, allowed, saveClassification, removeClassification, classifyDataset } from '../store'
+import { uid, isDatasetVersion, classificationUses } from '../domain'
 import FormDialog from './GovernanceFormDialog.vue'
 const executionText = value => ['待后端落实','待后端保障'].includes(value) ? '—' : value==='后端保障'?'系统策略':value
 defineProps({ page: String })
-const tab = ref('数据字典')
+const tab = ref('分类字典')
+const classificationKind = ref('domain')
+const classificationRoots = computed(()=>state.classifications.filter(item=>item.kind==='domain' && !item.parentId))
+const classificationRows = computed(()=> {
+  const matches = row => `${row.name} ${row.code} ${row.description || ''}`.includes(search.value.trim())
+  if (classificationKind.value==='type') return state.classifications.filter(item=>item.kind==='type' && matches(item))
+  return classificationRoots.value.map(root=>({...root,children:state.classifications.filter(item=>item.parentId===root.id && (matches(root) || matches(item)))})).filter(root=>matches(root) || root.children.length)
+})
+const categoryUses = id => classificationUses(state,id).filter(dataset=>allowed('view',dataset.id))
 const search = ref('')
 const dialog = ref(false)
 const fields = ref([])
@@ -22,7 +30,7 @@ const targetVersion=ref('')
 const historyOpen=ref(false)
 const historyRows=ref([])
 const historyTitle=ref('')
-const collectionForTab=()=>({'数据字典':'terms','内容标准模板':'fieldTemplates'}[tab.value] || 'standards')
+const collectionForTab=()=>({'分类字典':'classifications','内容标准模板':'fieldTemplates'}[tab.value] || 'standards')
 const versionsFor=id=>state.versions.filter(item=>item.datasetId===id && isDatasetVersion(item)).sort((a,b)=>b.number-a.number)
 function history(row) {historyRows.value=state.standardVersions.filter(item=>item.collection===collectionForTab() && item.standardId===row.id).sort((a,b)=>b.revision-a.revision);historyTitle.value=row.name;historyOpen.value=true}
 function confirmFlow(row) {
@@ -45,6 +53,34 @@ function bindTemplate(row) {
   dialog.value=true
 }
 function inspectDataset() {checkGovernance(checkOperation.value,{datasetId:targetDataset.value,versionId:targetVersion.value})}
+function editClassification(row, parent) {
+  if (!isAdmin.value || !requireAction('edit')) return
+  const kind=row?.kind || classificationKind.value
+  fields.value=[{key:'name',label:'分类名称',required:true},{key:'code',label:'分类代码',required:true}]
+  if (kind==='domain') fields.value.push({key:'parentId',label:'上级领域',type:'select',options:[{label:'无（一级领域）',value:''},...classificationRoots.value.filter(item=>item.id!==row?.id && item.enabled!==false).map(item=>({label:item.name,value:item.id}))],default:parent?.id || ''})
+  fields.value.push({key:'description',label:'分类说明',type:'textarea'},{key:'enabled',label:'启用',type:'switch',default:true})
+  initial.value=row || {};dialogTitle.value=`${row?'编辑':'新增'}${kind==='domain'?'领域':'数据类型'}`
+  handler=data=>saveClassification(row,{...data,kind,parentId:kind==='type'?'':data.parentId})
+  dialog.value=true
+}
+async function deleteCategory(row) {
+  if (!isAdmin.value) return
+  try {await ElMessageBox.confirm(`确定删除分类“${row.name}”？`,'删除分类',{type:'warning'});removeClassification(row)} catch {}
+}
+function chooseDatasetClassification() {
+  if (!requireAction('edit')) return
+  const available=state.datasets.filter(dataset=>allowed('edit',dataset.id))
+  const dataset=available.find(item=>item.id===targetDataset.value) || available[0]
+  if (!dataset) return
+  const rootOptions=()=>classificationRoots.value.filter(item=>item.enabled!==false).map(item=>({label:item.name,value:item.id}))
+  const childOptions=id=>state.classifications.filter(item=>item.parentId===id && item.enabled!==false).map(item=>({label:item.name,value:item.id}))
+  fields.value=[{key:'datasetId',label:'数据集',type:'select',required:true,options:available.map(item=>({label:item.name,value:item.id})),onChange:(id,form)=>{const item=available.find(row=>row.id===id);form.domainId=item.domainId;form.subdomainId=item.subdomainId;form.typeId=item.typeId;fields.value[2].options=childOptions(item.domainId)}},
+    {key:'domainId',label:'一级领域',type:'select',required:true,options:rootOptions(),onChange:(id,form)=>{form.subdomainId='';fields.value[2].options=childOptions(id)}},
+    {key:'subdomainId',label:'二级领域',type:'select',required:true,options:childOptions(dataset.domainId)},
+    {key:'typeId',label:'数据类型',type:'select',required:true,options:state.classifications.filter(item=>item.kind==='type' && item.enabled!==false).map(item=>({label:item.name,value:item.id}))}]
+  initial.value={datasetId:dataset.id,domainId:dataset.domainId,subdomainId:dataset.subdomainId,typeId:dataset.typeId};dialogTitle.value='数据集分类'
+  handler=data=>classifyDataset(data.datasetId,data);dialog.value=true
+}
 function edit(row) {
   if (!requireAction('edit')) return
   const dictionary = tab.value === '数据字典'
@@ -95,9 +131,17 @@ async function remove(row) { if (!requireAction('edit')) return; if (row.stages 
 </script>
 <template>
   <section v-if="page === 'standards'" class="panel">
-    <el-tabs v-model="tab"><el-tab-pane v-for="name in ['数据字典','内容标准模板','全流程标准','元数据规范']" :key="name" :label="name" :name="name" /></el-tabs>
-    <div class="toolbar"><el-input v-model="search" placeholder="搜索名称、字段或说明" clearable><template #prefix><el-icon><Search /></el-icon></template></el-input><span class="toolbar-spacer"></span><el-button type="primary" :disabled="!allowed('edit')" @click="edit()"><el-icon><Plus /></el-icon>新增{{ tab==='数据字典'?'术语':'规范' }}</el-button></div>
-    <el-table v-if="tab==='数据字典'" :data="terms"><el-table-column label="术语名称" prop="name" min-width="130" /><el-table-column label="关联字段" prop="field" min-width="160" /><el-table-column label="类型" prop="type" width="90" /><el-table-column label="单位" prop="unit" width="100" /><el-table-column label="定义与说明" prop="description" min-width="250" /><el-table-column label="内容约束" min-width="200"><template #default="{row}"><div class="tags"><el-tag v-if="row.required">必填</el-tag><el-tag v-if="row.unique">唯一</el-tag><el-tag v-if="row.checkRange">{{ row.min }}—{{ row.max }}{{ row.unit }}</el-tag><el-tag v-if="row.enabled===false" type="info">已停用</el-tag><el-tag v-if="row.severity==='提醒'" type="warning">提醒</el-tag></div></template></el-table-column><el-table-column label="应用数据集" width="100"><template #default="{row}"><el-tooltip :content="usingTerm(row.id).map(dataset=>dataset.name).join('、') || '尚未绑定'"><span>{{ usingTerm(row.id).length }}个</span></el-tooltip></template></el-table-column><el-table-column label="操作" width="210"><template #default="{row}"><el-button link type="primary" :disabled="!allowed('edit')" @click="edit(row)">编辑</el-button><el-button link type="primary" @click="history(row)">历史</el-button><el-button link type="danger" :disabled="!allowed('edit')" @click="remove(row)">删除</el-button></template></el-table-column></el-table>
+    <el-tabs v-model="tab"><el-tab-pane v-for="name in ['分类字典','内容标准模板','全流程标准','元数据规范']" :key="name" :label="name" :name="name" /></el-tabs>
+    <div class="toolbar"><el-input v-model="search" :placeholder="tab==='分类字典'?'搜索分类名称、代码或说明':'搜索名称、字段或说明'" clearable><template #prefix><el-icon><Search /></el-icon></template></el-input><el-radio-group v-if="tab==='分类字典'" v-model="classificationKind"><el-radio-button value="domain">领域分类</el-radio-button><el-radio-button value="type">数据类型</el-radio-button></el-radio-group><span class="toolbar-spacer"></span><template v-if="tab==='分类字典'"><el-button :disabled="!allowed('edit')" @click="chooseDatasetClassification"><el-icon><PriceTag /></el-icon>数据集分类</el-button><el-button type="primary" :disabled="!isAdmin || !allowed('edit')" @click="editClassification()"><el-icon><Plus /></el-icon>新增{{ classificationKind==='domain'?'领域':'类型' }}</el-button></template><el-button v-else type="primary" :disabled="!allowed('edit')" @click="edit()"><el-icon><Plus /></el-icon>新增规范</el-button></div>
+    <el-table v-if="tab==='分类字典'" :key="classificationKind + search" :data="classificationRows" row-key="id" default-expand-all max-height="560">
+      <el-table-column label="分类名称" min-width="200"><template #default="{row}"><el-icon class="classification-icon"><component :is="row.kind==='type'?'Files':row.parentId?'PriceTag':'FolderOpened'" /></el-icon>{{ row.name }}</template></el-table-column>
+      <el-table-column label="代码" prop="code" min-width="130" />
+      <el-table-column label="层级" width="100"><template #default="{row}">{{ row.kind==='type'?'数据类型':row.parentId?'二级领域':'一级领域' }}</template></el-table-column>
+      <el-table-column label="分类说明" prop="description" min-width="180" />
+      <el-table-column label="数据集" width="90"><template #default="{row}"><el-tooltip :content="categoryUses(row.id).map(item=>item.name).join('、') || '暂无引用'"><span>{{ categoryUses(row.id).length }} 个</span></el-tooltip></template></el-table-column>
+      <el-table-column label="状态" width="90"><template #default="{row}"><el-tag :type="row.enabled===false?'info':'success'">{{ row.enabled===false?'已停用':'启用' }}</el-tag></template></el-table-column>
+      <el-table-column label="操作" width="280"><template #default="{row}"><el-button v-if="row.kind==='domain' && !row.parentId" link type="primary" :disabled="!isAdmin || row.enabled===false" @click="editClassification(null,row)">新增二级</el-button><el-button link type="primary" :disabled="!isAdmin" @click="editClassification(row)">编辑</el-button><el-button link type="primary" @click="history(row)">历史</el-button><el-button link type="danger" :disabled="!isAdmin" @click="deleteCategory(row)">删除</el-button></template></el-table-column>
+    </el-table>
     <el-table v-else-if="tab==='内容标准模板'" :data="contentTemplates"><el-table-column label="模板名称" prop="name" min-width="180" /><el-table-column label="引用字段" min-width="300"><template #default="{row}"><div class="tags"><el-tag v-for="id in row.termIds" :key="id">{{ state.terms.find(term=>term.id===id)?.name }}</el-tag></div></template></el-table-column><el-table-column label="应用数据集" min-width="200"><template #default="{row}">{{ usingTemplate(row.id).map(dataset=>dataset.name).join('、') || '尚未绑定' }}</template></el-table-column><el-table-column label="操作" width="290"><template #default="{row}"><el-button link type="primary" :disabled="!allowed('edit')" @click="bindTemplate(row)">绑定数据集</el-button><el-button link type="primary" :disabled="!allowed('edit')" @click="edit(row)">编辑</el-button><el-button link type="primary" @click="history(row)">历史</el-button><el-button link type="danger" :disabled="!allowed('edit')" @click="remove(row)">删除</el-button></template></el-table-column></el-table>
     <el-table v-else-if="['全流程标准','元数据规范'].includes(tab)" :data="standards" row-key="id">
       <el-table-column type="expand"><template #default="{row}"><el-descriptions :column="2" border>

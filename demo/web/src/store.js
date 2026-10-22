@@ -9,6 +9,7 @@ import { auth } from './auth'
 import { parseEntries } from './imports'
 import { finishTaskTracking } from './tasks'
 import { extractKnowledgeGraph } from './knowledgeGraph'
+import { ensureClassifications, saveClassification as reviseClassification, removeClassification as deleteClassification, assignDatasetClassification } from './domain'
 
 function prepareGovernance(data) {
   addIndustryDatasets(data)
@@ -20,6 +21,7 @@ function prepareGovernance(data) {
     dataset.ownerId = dataset.owner || dataset.ownerId || '管理员'
     dataset.owner ||= dataset.ownerId
   }
+  ensureClassifications(data)
   ensureLifecycleGovernance(data)
   seedGovernanceExamples(data)
   return migrateWorkspace(data)
@@ -412,6 +414,21 @@ export function saveStandard(collection,row,definition) {
   if (!requireAction('edit')) return false
   reviseStandard(state,collection,row?.id || definition.id || uid('standard'),definition,state.role)
   notify('已保存新修订');return true
+}
+export function saveClassification(row, definition) {
+  if (!requireAction('edit') || state.role!=='管理员') return false
+  try {reviseClassification(state,row?.id,definition,state.role);notify('分类已保存');return true}
+  catch (error) {ElMessage.warning(error.message);return false}
+}
+export function removeClassification(row) {
+  if (!requireAction('edit') || state.role!=='管理员') return false
+  try {deleteClassification(state,row.id);notify('分类已删除');return true}
+  catch (error) {ElMessage.warning(error.message);return false}
+}
+export function classifyDataset(datasetId, selection) {
+  if (!requireAction('edit',datasetId)) return false
+  try {assignDatasetClassification(state,datasetId,selection);notify('数据集分类已更新');return true}
+  catch (error) {ElMessage.warning(error.message);return false}
 }
 export function confirmStandard(standardId,datasetId,versionId,note) {
   if (!requireAction('review',datasetId)) return false

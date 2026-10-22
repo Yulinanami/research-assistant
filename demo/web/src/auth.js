@@ -37,10 +37,12 @@ export function publicCatalog(data) {
     if (dataset.level !== '公开' || dataset.storageState === '已归档') continue
     const published = data.versions.filter(version => version.datasetId === dataset.id && version.status === '已发布' && isDatasetVersion(version)).sort((a,b) => b.number - a.number)
     if (!published.length) continue
-    datasets.push({ id:dataset.id, code:dataset.code, name:dataset.name, type:dataset.type, industry:dataset.industry, introduction:dataset.introduction || dataset.demand || dataset.scene || '', tags:[...(dataset.tags || [])], coverIcon:dataset.coverIcon, coverTone:dataset.coverTone, publisherId:dataset.publisherId || published[0].release?.publisher || dataset.owner, downloads:dataset.downloads || 0 })
+    datasets.push({ id:dataset.id, code:dataset.code, name:dataset.name, type:dataset.type, industry:dataset.industry, subindustry:dataset.subindustry, domainId:dataset.domainId, subdomainId:dataset.subdomainId, typeId:dataset.typeId, introduction:dataset.introduction || dataset.demand || dataset.scene || '', tags:[...(dataset.tags || [])], coverIcon:dataset.coverIcon, coverTone:dataset.coverTone, publisherId:dataset.publisherId || published[0].release?.publisher || dataset.owner, downloads:dataset.downloads || 0 })
     for (const version of published) versions.push({ id:version.id, datasetId:dataset.id, number:version.number, kind:'dataset', status:'已发布', totalRecords:version.totalRecords ?? version.records?.length ?? 0, records:[], published:version.published, created:version.created, release:version.release ? {tag:version.release.tag,publishedAt:version.release.publishedAt,publisher:version.release.publisher} : undefined })
   }
-  return {datasets,versions}
+  const used = new Set(datasets.flatMap(dataset=>[dataset.domainId,dataset.subdomainId,dataset.typeId]).filter(Boolean))
+  const classifications = (data.classifications || []).filter(item=>used.has(item.id)).map(item=>({id:item.id,kind:item.kind,name:item.name,parentId:item.parentId}))
+  return {datasets,versions,classifications}
 }
 
 export function publicRecommendations(data) {

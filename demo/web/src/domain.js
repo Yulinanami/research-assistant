@@ -341,8 +341,95 @@ export function updateQualityIssue(report,id,details,operator) {
 }
 
 
-const standardCollections=['terms','fieldTemplates','standards','storagePolicies']
+const standardCollections=['terms','fieldTemplates','standards','storagePolicies','classifications']
 const governanceCopy=value=>JSON.parse(JSON.stringify(value))
+
+export function ensureClassifications(data) {
+  data.classifications ||= []
+  const groups = [
+    ['农业科研',['土壤与水肥','作物与植保']], ['医疗健康',['医疗服务']], ['生态环境',['流域水质']],
+    ['金融财会',['企业财务']], ['工业制造',['设备运维']], ['交通运输',['道路交通']],
+    ['能源电力',['光伏发电']], ['零售电商',['客户服务']], ['教育培训',['科学教育']],
+    ['政务服务',['政务咨询']], ['科研教育',['文献资料']],
+  ]
+  const descriptions = {
+    农业科研:'作物、土壤、水肥和农业试验数据。',土壤与水肥:'土壤性质、墒情及灌溉施肥观测。',作物与植保:'作物生长、叶片外观及植保观察。',
+    医疗健康:'医疗服务与健康领域的数据资源。',医疗服务:'预约咨询、设备报修和服务事项分类。',生态环境:'水体、环境与生态监测数据。',流域水质:'河流站点、水质指标与时序观测。',
+    金融财会:'财务报表、经营指标与财会知识。',企业财务:'企业财务指标、计算口径与问答。',工业制造:'生产设备、运维与制造过程记录。',设备运维:'设备编号、巡检、状态及故障记录。',
+    交通运输:'道路、车辆与交通运行数据。',道路交通:'道路车辆图片、类别与交通观察。',能源电力:'发电、用电及能源运行数据。',光伏发电:'光伏功率、气象因素与时序指标。',
+    零售电商:'商品、订单、售后与零售服务数据。',客户服务:'订单咨询、售后意图及客服对话。',教育培训:'教学内容、课程资源与学习数据。',科学教育:'科学概念、课程知识与教学问答。',
+    政务服务:'公共服务事项与咨询数据。',政务咨询:'办事材料、办理进度与服务咨询。',科研教育:'科研文献与知识整理资源。',文献资料:'论文、摘要、主题与文献来源信息。',
+    文本:'以正文、片段等文字内容为主。',图片:'以图片为主体，可附类别与区域标注。',问答对:'以问题与答案配对组织。',文本分类:'包含文本内容及分类标签。',结构化数据:'以字段组织业务记录。',时序数据:'按时间组织的观测或指标记录。',多轮对话:'按角色和顺序组织多轮消息。',
+  }
+  if (!data.classificationsSeeded) {
+    groups.forEach(([name,children],index) => {
+      const code = `D${String(index+1).padStart(2,'0')}`, id = `domain-${index+1}`
+      if (!data.classifications.some(item=>item.id===id)) data.classifications.push({id,kind:'domain',code,name,parentId:'',enabled:true,description:descriptions[name]})
+      children.forEach((name,child) => {
+        const childId = `${id}-${child+1}`
+        if (!data.classifications.some(item=>item.id===childId)) data.classifications.push({id:childId,kind:'domain',code:`${code}-${child+1}`,name,parentId:id,enabled:true,description:descriptions[name]})
+      })
+    })
+    const types = ['文本','图片','问答对','文本分类','结构化数据','时序数据','多轮对话']
+    types.forEach((name,index) => data.classifications.push({id:`data-type-${index+1}`,kind:'type',code:`T${String(index+1).padStart(2,'0')}`,name,parentId:'',enabled:true,description:descriptions[name]}))
+    data.classificationsSeeded = true
+  }
+  const aliases = {'土壤科研':'农业科研','农业生产':'农业科研','文献调研':'科研教育'}
+  const children = {soil:'土壤与水肥',paper:'文献资料',health:'医疗服务',finance:'企业财务',industry:'设备运维',traffic:'道路交通',energy:'光伏发电',retail:'客户服务',education:'科学教育',agriculture:'作物与植保',water:'流域水质',government:'政务咨询','governance-demo-metadata':'文献资料','governance-demo-collection':'流域水质','quality-demo-soil':'土壤与水肥','quality-demo-qa':'土壤与水肥'}
+  for (const dataset of data.datasets) {
+    if (dataset.domainId) continue
+    const name = aliases[dataset.industry] || dataset.industry || dataset.project || '未分类'
+    let domain = data.classifications.find(item=>item.kind==='domain' && !item.parentId && item.name===name)
+    if (!domain) { domain={id:uid('domain'),kind:'domain',code:`LOCAL-${uid().slice(-8).toUpperCase()}`,name,parentId:'',enabled:true,description:''};data.classifications.push(domain) }
+    let type = data.classifications.find(item=>item.kind==='type' && item.name===dataset.type)
+    if (!type) {type={id:uid('data-type'),kind:'type',code:`TYPE-${uid().slice(-8).toUpperCase()}`,name:dataset.type,parentId:'',enabled:true,description:''};data.classifications.push(type)}
+    const child = data.classifications.find(item=>item.parentId===domain.id && item.name===children[dataset.id.replace(/^industry-/, '')])
+    dataset.domainId=domain.id;dataset.subdomainId=child?.id || '';dataset.typeId=type.id
+    dataset.industry=domain.name;dataset.subindustry=child?.name || ''
+    dataset.classificationSnapshot={domain:governanceCopy(domain),subdomain:child?governanceCopy(child):null,type:governanceCopy(type)}
+  }
+  return data
+}
+
+export function classificationUses(data, id) {
+  return data.datasets.filter(dataset=>[dataset.domainId,dataset.subdomainId,dataset.typeId].includes(id))
+}
+
+export function saveClassification(data, id, definition, operator) {
+  const current = data.classifications.find(item=>item.id===id)
+  const next = {kind:definition.kind,name:definition.name?.trim(),code:definition.code?.trim(),parentId:definition.parentId || '',enabled:definition.enabled!==false,description:definition.description || ''}
+  if (!next.name || !next.code || !['domain','type'].includes(next.kind)) throw new Error('请填写分类名称、代码和类别')
+  if (current && (next.code!==current.code || next.kind!==current.kind)) throw new Error('已有分类代码和类别不可修改')
+  if (next.parentId) {
+    const parent = data.classifications.find(item=>item.id===next.parentId)
+    if (next.kind!=='domain' || !parent || parent.kind!=='domain' || parent.parentId || parent.id===id) throw new Error('领域分类最多两级，请选择一级领域')
+    if (parent.enabled===false && (!current || current.parentId!==parent.id)) throw new Error('上级领域已停用')
+  }
+  if (current && next.parentId!==current.parentId && (classificationUses(data,id).length || data.classifications.some(item=>item.parentId===id))) throw new Error('分类已被引用或有子类，不能移动层级')
+  if (data.classifications.some(item=>item.id!==id && item.code===next.code)) throw new Error('分类代码已存在')
+  if (data.classifications.some(item=>item.id!==id && item.kind===next.kind && item.parentId===next.parentId && item.name===next.name)) throw new Error('同一层级已有同名分类')
+  data.standardVersions ||= []
+  return reviseStandard(data,'classifications',id || uid('classification'),next,operator)
+}
+
+export function removeClassification(data, id) {
+  if (classificationUses(data,id).length) throw new Error('分类正在被数据集引用，请停用并保留历史')
+  if (data.classifications.some(item=>item.parentId===id)) throw new Error('请先处理该领域的子类')
+  const index=data.classifications.findIndex(item=>item.id===id)
+  if (index>=0) data.classifications.splice(index,1)
+}
+
+export function assignDatasetClassification(data, datasetId, selection) {
+  const dataset=data.datasets.find(item=>item.id===datasetId)
+  if (!dataset) throw new Error('找不到数据集')
+  const domain=data.classifications.find(item=>item.id===selection.domainId && item.kind==='domain' && !item.parentId)
+  const child=data.classifications.find(item=>item.id===selection.subdomainId && item.kind==='domain' && item.parentId===domain?.id)
+  const type=data.classifications.find(item=>item.id===selection.typeId && item.kind==='type')
+  if (!domain || !child || !type) throw new Error('请选择有效的一级领域、所属二级领域和数据类型')
+  if ([domain,child,type].some(item=>item.enabled===false)) throw new Error('不能选择已停用的分类')
+  Object.assign(dataset,{domainId:domain.id,subdomainId:child.id,typeId:type.id,industry:domain.name,subindustry:child.name,type:type.name,classificationSnapshot:{domain:governanceCopy(domain),subdomain:governanceCopy(child),type:governanceCopy(type)}})
+  return dataset
+}
 
 export function ensureLifecycleGovernance(data) {
   data.standardVersions ||= []

@@ -2,10 +2,56 @@ import { migrateWorkspace as mainMigrateWorkspace } from '../src/workspace.js'
 import { initialData as mainInitialData, seedGovernanceExamples, addIndustryDatasets, addGovernanceDemoDatasets, addContentGovernance } from '../src/data.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { ensureClassifications, saveClassification, removeClassification, assignDatasetClassification } from '../src/domain.js'
 import { ensureLifecycleGovernance, reviseStandard, confirmManualStandard, storageInfoFor, buildDatasetTrace, publicationEvidence, governanceMetrics, serviceAccess, qualityFingerprint, contentFieldsFor, mapContentRecords, parseCsvRecords, runQualityReport, qualityGateIssues, updateQualityIssue, ensureGovernance, validateGovernance, nextDatasetCode, canDownload, createVersion, reviewVersion, publishVersion, splitText, cleanText, cleanImages, isDatasetVersion, augmentRecords, exportRecords,  isVersionAuthorized, submitVersionReview } from '../src/domain.js'
 
 function initialData() { return addIndustryDatasets(mainInitialData()) }
 function migrateWorkspace(data) { ensureGovernance(data); return mainMigrateWorkspace(data) }
+
+test('分类初始化幂等，补齐样例两级领域且不改写历史字段和发布证据', () => {
+  const data=initialData()
+  ensureGovernance(data)
+  const preserved=JSON.stringify({terms:data.terms,versions:data.versions})
+  ensureClassifications(data)
+  const health=data.datasets.find(item=>item.id==='industry-health')
+  assert.equal(data.classifications.find(item=>item.id===health.domainId).name,'医疗健康')
+  assert.equal(data.classifications.find(item=>item.id===health.subdomainId).name,'医疗服务')
+  const snapshot=JSON.stringify(data.classifications)
+  ensureClassifications(data)
+  assert.equal(JSON.stringify(data.classifications),snapshot)
+  assert.equal(JSON.stringify({terms:data.terms,versions:data.versions}),preserved)
+})
+
+test('分类维护限制两级、名称与代码冲突，保护引用和停用状态', () => {
+  const data=ensureClassifications(ensureGovernance(initialData()))
+  ensureLifecycleGovernance(data)
+  const root=saveClassification(data,null,{kind:'domain',code:'LOCAL',name:'自定义领域',parentId:'',enabled:true},'管理员')
+  const child=saveClassification(data,null,{kind:'domain',code:'LOCAL-01',name:'试验主题',parentId:root.id,enabled:true},'管理员')
+  assert.throws(()=>saveClassification(data,null,{kind:'domain',code:'OTHER',name:'三级',parentId:child.id,enabled:true},'管理员'),/两级/)
+  assert.throws(()=>saveClassification(data,null,{kind:'domain',code:'LOCAL-02',name:'试验主题',parentId:root.id},'管理员'),/同名/)
+  assert.throws(()=>saveClassification(data,null,{kind:'type',code:'LOCAL',name:'其他类型'},'管理员'),/代码/)
+  const type=data.classifications.find(item=>item.kind==='type'&&item.name==='问答对')
+  const health=data.datasets.find(item=>item.id==='industry-health')
+  assignDatasetClassification(data,health.id,{domainId:root.id,subdomainId:child.id,typeId:type.id})
+  assert.equal(health.industry,'自定义领域')
+  assert.equal(health.subindustry,'试验主题')
+  assert.equal(health.type,'问答对')
+  assert.equal(health.classificationSnapshot.subdomain.name,'试验主题')
+  assert.throws(()=>removeClassification(data,child.id),/引用/)
+  assert.throws(()=>removeClassification(data,root.id),/子类|引用/)
+  const otherRoot=data.classifications.find(item=>item.kind==='domain'&&!item.parentId&&item.id!==root.id)
+  assert.throws(()=>assignDatasetClassification(data,health.id,{domainId:otherRoot.id,subdomainId:child.id,typeId:type.id}),/二级/)
+  saveClassification(data,child.id,{...child,enabled:false},'管理员')
+  assert.throws(()=>assignDatasetClassification(data,health.id,{domainId:root.id,subdomainId:child.id,typeId:type.id}),/停用/)
+  ensureClassifications(data)
+  assert.equal(data.classifications.find(item=>item.id===child.id).enabled,false)
+  assert.equal(health.subdomainId,child.id)
+  assert(data.standardVersions.some(item=>item.collection==='classifications'&&item.standardId===child.id&&item.revision===2))
+  const unused=saveClassification(data,null,{kind:'type',code:'TEMP',name:'临时类别'},'管理员')
+  removeClassification(data,unused.id)
+  ensureClassifications(data)
+  assert.equal(data.classifications.some(item=>item.id===unused.id),false)
+})
 
 test('治理规则：编号补齐稳定且新编号唯一，旧文字规范保留', () => {
   const data = initialData()

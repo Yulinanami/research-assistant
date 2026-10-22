@@ -48,6 +48,12 @@ test('登录返回目标保存在会话中，读取后清除，损坏记录不�
   assert.equal(takeLoginReturn({getItem:()=>'{broken',removeItem:()=>{}}),null)
 })
 
+test('公开分类只返回公开数据使用的领域、二级领域和类型，不包含内部专有分类', () => {
+  const result=publicCatalog({datasets:[{id:'pub',level:'公开',domainId:'d',subdomainId:'c',typeId:'t'},{id:'private',level:'内部',domainId:'secret'}],versions:[{id:'v',datasetId:'pub',number:1,status:'已发布',records:[]}],classifications:[{id:'d',name:'公开领域',kind:'domain',parentId:'',description:'内部管理说明'},{id:'c',name:'公开主题',kind:'domain',parentId:'d'},{id:'t',name:'文本',kind:'type',parentId:''},{id:'secret',name:'内部专有',kind:'domain',parentId:''}]})
+  assert.deepEqual(result.classifications.map(item=>item.id),['d','c','t'])
+  assert.equal(Object.hasOwn(result.classifications[0],'description'),false)
+})
+
 test('登录状态缺失、损坏、存储不可用或身份无效时回到未登录状态', () => {
   assert.equal(readDemoSession(null),null)
   assert.equal(readDemoSession({getItem:()=>'{invalid'}),null)
