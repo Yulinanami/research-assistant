@@ -2,7 +2,7 @@
 import { computed, ref, onMounted, watch } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { navigation } from './data'
-import { state, storage, initialize, resetDemo, allowed, projectDatasets, visibleProjects, openProject } from './store'
+import { state, storage, initialize, resetDemo, allowed, projectDatasets, visibleProjects, openProject, canManageProject } from './store'
 import LandingView from './components/LandingView.vue'
 import ProjectsView from './components/ProjectsView.vue'
 import DatasetLibrary from './components/DatasetLibrary.vue'
@@ -16,28 +16,29 @@ import PreparationView from './components/PreparationView.vue'
 import AnnotationWorkbench from './components/AnnotationWorkbench.vue'
 import TaskCenter from './components/TaskCenter.vue'
 import ProjectFlowConfig from './components/ProjectFlowConfig.vue'
+import ProjectConfigDialog from './components/ProjectConfigDialog.vue'
 import SettingsView from './components/SettingsView.vue'
 import PublicHome from './components/PublicHome.vue'
 import { auth, loginDemo, logoutDemo, resolveSessionPage } from './auth'
 const internalPages = [
   { id:'planning', title:'需求与数据规划', subtitle:'明确当前项目的数据用途、结构与质量要求' },
   { id:'sources', title:'数据采集与语料管理', subtitle:'在当前项目导入和管理资料，保留原始文件与来源' },
-  { id:'processing', title:'数据预处理', subtitle:'在项目内完成文档解析与数据清洗，衔接后续标注' },
-  { id:'generation', title:'数据标注', subtitle:'按任务模板生成、分类或人工标注数据' },
+  { id:'processing', title:'数据预处理', subtitle:'按版块清洗、生成知识片段、提取问答与增强 SFT 数据' },
+  { id:'generation', title:'数据标注', subtitle:'按文本、图像、问答与图文数据选择标注模板' },
   { id:'versions', title:'项目成果', subtitle:'预览、自检与导出项目成果，完成后提交治理审核' },
-  { id:'settings', title:'设置', subtitle:'统一维护解析、模型、清洗与标注模板' },
+  { id:'settings', title:'后台配置', subtitle:'集中维护解析、QA、知识图谱提示词及模型和任务配置' },
 ]
 const pages = [...navigation.flatMap(group => group.items), ...internalPages,
   {id:'task-center',title:'任务管理中心',subtitle:'汇总解析、清洗与标注等任务，跟踪进度、耗时和执行结果'}]
 const resolve = id => {
-  id = ({plaza:'square',review:'audit',release:'audit',permissions:'standards'})[id] || id
-  if (id === 'cleaning') state.ui.preprocessingStage = 'cleaning'
+  if (['knowledge','global-index'].includes(id)) state.ui.annotationMode = '知识图谱'
   return resolveSessionPage(id, Boolean(auth.session), pages.map(item => item.id))
 }
 const runningTasks = computed(() => state.tasks.filter(task => task.status === '执行中' && allowed('view',task.datasetId)).length)
 const page = ref(resolve(location.hash.slice(1) || 'home'))
 const collapsed = ref(false)
 const flowConfigOpen = ref(false)
+const projectConfigOpen = ref(false)
 const projectPages = ['planning','sources','processing','generation','versions']
 const inProject = computed(() => projectPages.includes(page.value))
 const inGovernance = computed(() => navigation.find(group => group.title === '数据治理与共享').items.some(item => item.id === page.value))
@@ -51,13 +52,14 @@ function flowStarted(flow) {
   state.ui.taskCenterScope = {projectId: flow.projectId, datasetId: flow.datasetId}
   navigate('task-center')
 }
-watch(() => [page.value, state.role, state.activeProjectId], () => { flowConfigOpen.value = false })
+watch(() => [page.value, state.role, state.activeProjectId], () => { flowConfigOpen.value = false; projectConfigOpen.value = false })
 function ensureContext() {
   if (!auth.session) return
   if (!visibleProjects().some(item => item.id === state.activeProjectId)) { state.activeProjectId = ''; state.activeDataset = ''; return }
   if (!datasets.value.some(item => item.id === state.activeDataset)) state.activeDataset = datasets.value[0]?.id || ''
 }
 watch(() => [state.role, JSON.stringify(state.permissions)], ensureContext)
+watch(() => visibleProjects().map(project => project.id).join('|'), ensureContext)
 watch(() => state.role, role => { if (auth.session && role !== auth.session.role) loginDemo(role) })
 watch(() => state.activeDataset, id => {
   if (!id) return
@@ -87,13 +89,14 @@ onMounted(async () => { await initialize(); ensureContext(); syncRoute(); window
     </aside>
     <div class="main-shell">
       <header class="topbar"><el-breadcrumb separator="/"><el-breadcrumb-item>{{ inProject ? '数据加工' : inGovernance ? '数据治理与共享' : '工作空间' }}</el-breadcrumb-item><el-breadcrumb-item v-if="inProject && project">{{ project.name }}</el-breadcrumb-item><el-breadcrumb-item>{{ current.title }}</el-breadcrumb-item></el-breadcrumb>
-        <div class="topbar-actions"><span class="demo-chip"><i></i>演示模式</span><el-button text class="task-center-entry" :type="page === 'task-center' ? 'primary' : ''" @click="navigate('task-center')"><el-icon><List /></el-icon><span>任务管理中心</span><el-tag v-if="runningTasks" size="small">{{ runningTasks }}</el-tag></el-button><el-button text :type="page === 'settings' ? 'primary' : ''" @click="navigate('settings')"><el-icon><SetUp /></el-icon><span>设置</span></el-button><el-popover placement="bottom-end" :width="340" trigger="click"><template #reference><el-button text aria-label="消息"><el-badge :value="state.notices.length" :max="9"><el-icon><Bell /></el-icon></el-badge></el-button></template><div class="notice" v-for="(notice,i) in state.notices.slice(0,8)" :key="i">{{ notice }}</div></el-popover><span class="top-divider"></span><div class="avatar">{{ state.role.slice(0,1) }}</div><el-dropdown @command="userCommand"><button class="user-menu"><b>{{ state.role }}</b><small>切换演示身份<el-icon><ArrowDown /></el-icon></small></button><template #dropdown><el-dropdown-menu><el-dropdown-item v-for="role in ['管理员','加工人员','审核人员','数据使用者']" :key="role" :command="role">{{ role }}</el-dropdown-item><el-dropdown-item divided command="reset">重置演示数据</el-dropdown-item><el-dropdown-item divided command="logout">退出登录</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
+        <div class="topbar-actions"><span class="demo-chip"><i></i>演示模式</span><el-button text class="task-center-entry" :type="page === 'task-center' ? 'primary' : ''" @click="navigate('task-center')"><el-icon><List /></el-icon><span>任务管理中心</span><el-tag v-if="runningTasks" size="small">{{ runningTasks }}</el-tag></el-button><el-button text :type="page === 'settings' ? 'primary' : ''" @click="navigate('settings')"><el-icon><SetUp /></el-icon><span>后台配置</span></el-button><span class="top-divider"></span><div class="avatar">{{ state.role.slice(0,1) }}</div><el-dropdown @command="userCommand"><button class="user-menu"><b>{{ state.role }}</b><small>切换演示身份<el-icon><ArrowDown /></el-icon></small></button><template #dropdown><el-dropdown-menu><el-dropdown-item v-for="role in ['管理员','加工人员','审核人员','数据使用者']" :key="role" :command="role">{{ role }}</el-dropdown-item><el-dropdown-item divided command="reset">重置演示数据</el-dropdown-item><el-dropdown-item divided command="logout">退出登录</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
       </header>
       <main v-if="storage.ready" class="page-content">
         <el-alert v-if="storage.error" :title="storage.error" type="warning" :closable="false" />
         <div v-if="!inGovernance" class="page-heading"><div><div class="eyebrow">{{ inProject || page === 'projects' ? 'DATA PROCESSING' : page === 'settings' ? 'WORKSPACE SETTINGS' : inGovernance ? 'DATA GOVERNANCE' : 'RESEARCH WORKSPACE' }}</div><h1>{{ current.title }}</h1><p>{{ current.subtitle }}</p></div><span class="save-state"><i></i>{{ storage.saving ? '正在保存…' : '已保存到本地' }}</span></div>
         <template v-if="inProject && project">
-          <section class="project-context"><div><span class="icon-tile blue"><el-icon><FolderOpened /></el-icon></span><div><small>当前项目</small><b>{{ project.name }}</b></div></div><div class="project-context-actions"><el-select :model-value="state.activeProjectId" aria-label="切换项目" @change="enterSelectedProject"><el-option v-for="item in visibleProjects()" :key="item.id" :value="item.id" :label="item.name" /></el-select><el-select v-if="datasets.length" v-model="state.activeDataset" aria-label="当前目标数据集"><el-option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id" :label="dataset.name" /></el-select><el-button class="flow-config-entry" @click="flowConfigOpen = true"><el-icon><SetUp /></el-icon>流程配置</el-button><el-button text @click="navigate('projects')">全部项目</el-button></div></section>
+          <section class="project-context"><div><span class="icon-tile blue"><el-icon><FolderOpened /></el-icon></span><div><small>当前项目</small><b>{{ project.name }}</b></div></div><div class="project-context-actions"><el-select :model-value="state.activeProjectId" aria-label="切换项目" @change="enterSelectedProject"><el-option v-for="item in visibleProjects()" :key="item.id" :value="item.id" :label="item.name" /></el-select><el-select v-if="datasets.length" v-model="state.activeDataset" aria-label="当前目标数据集"><el-option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id" :label="dataset.name" /></el-select><el-button v-if="canManageProject(project)" @click="projectConfigOpen = true">项目设置</el-button><el-button class="flow-config-entry" @click="flowConfigOpen = true"><el-icon><SetUp /></el-icon>流程配置</el-button><el-button text @click="navigate('projects')">全部项目</el-button></div></section>
+          <ProjectConfigDialog v-model="projectConfigOpen" :project="project" />
           <el-drawer v-model="flowConfigOpen" title="流程配置" size="min(680px, 96vw)" destroy-on-close><ProjectFlowConfig v-if="flowConfigOpen" :key="state.role + ':' + state.activeProjectId" @started="flowStarted" /></el-drawer>
           <WorkflowSteps :page="page" @navigate="navigate" />
           <el-empty v-if="!datasets.length && page !== 'planning'" description="当前项目尚无数据集，请先定义建设目标"><el-button type="primary" @click="navigate('planning')">规划第一个数据集</el-button></el-empty>

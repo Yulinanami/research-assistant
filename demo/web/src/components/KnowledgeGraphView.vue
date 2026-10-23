@@ -6,7 +6,7 @@ import { recordAnnotationTask } from '../annotation'
 import { graphEntityTypes, validateKnowledgeGraph, updateGraphEntity, removeGraphEntity, exportKnowledgeGraph } from '../knowledgeGraph'
 import FormDialog from './FormDialog.vue'
 
-const props = defineProps({version:Object, editable:Boolean, exportable:Boolean})
+const props = defineProps({version:Object, editable:Boolean, exportable:Boolean, showDetails:{type:Boolean,default:true}})
 const emit = defineEmits(['saved'])
 const clone = value => JSON.parse(JSON.stringify(value))
 const graph = ref(null), dirty = ref(false), search = ref(''), zoom = ref(1), evidenceIds = ref([])
@@ -95,7 +95,8 @@ function save() {
   try {
     const reviewed = {...exportKnowledgeGraph(graph.value), reviewed:true}
     const record = {...clone(props.version.records.find(record => record.knowledge_graph)),knowledge_graph:reviewed}
-    const version = addVersion(props.version.datasetId,[record],'知识图谱',props.version.id)
+    const version = addVersion(props.version.datasetId,[record],'知识图谱',props.version.id,props.version.knowledgeBuildSignature ? 'processing' : undefined)
+    if (props.version.knowledgeBuildSignature) version.knowledgeBuildSignature = props.version.knowledgeBuildSignature
     const task = recordAnnotationTask(state.tasks,version,'知识图谱标注',100,taskName('知识图谱标注',version.datasetId))
     task.status = '已完成'; task.logs.push('实体、关系与来源已人工校订，另存图谱成果')
     graph.value = reviewed
@@ -115,7 +116,7 @@ function download() {
 <template>
   <div v-if="graph" class="knowledge-graph">
     <div class="graph-toolbar"><div class="tags"><el-tag>{{ graph.entities.length }} 个实体</el-tag><el-tag type="success">{{ graph.relationships.length }} 条关系</el-tag><el-tag type="info">{{ graph.chunks.length }} 个来源片段</el-tag><el-tag :type="graph.reviewed && !dirty ? 'success' : 'warning'">{{ graph.reviewed && !dirty ? '已人工校订' : '待人工校订' }}</el-tag></div><el-button v-if="exportable && allowed('edit',version.datasetId)" @click="download">导出图谱 JSON</el-button></div>
-    <p class="pipeline-note">参考 LightRAG 的实体、关系与来源结构。本地演示将同句出现的实体连接为候选关系，请核对含义后保存。</p>
+    <p v-if="showDetails" class="pipeline-note">参考 LightRAG 的实体、关系与来源结构。本地演示将同句出现的实体连接为候选关系，请核对含义后保存。</p>
     <p v-if="graph.is_truncated" class="pipeline-note">已达到本次实体上限，部分候选实体未纳入图谱；可提高上限重新抽取。</p>
     <div class="graph-toolbar"><el-input v-model="search" clearable placeholder="搜索实体名称或类型" aria-label="搜索图谱实体" /><div><el-button :disabled="zoom <= 0.6" aria-label="缩小图谱" @click="zoom = Math.max(0.6,zoom-0.2)">−</el-button><el-button @click="zoom = 1">重置视图</el-button><el-button :disabled="zoom >= 1.8" aria-label="放大图谱" @click="zoom = Math.min(1.8,zoom+0.2)">＋</el-button></div></div>
     <svg v-if="nodes.length" class="graph-canvas" viewBox="0 0 900 460" role="img" aria-label="实体关系图，点击实体或连线查看来源">
@@ -125,12 +126,14 @@ function download() {
       </g>
     </svg>
     <el-empty v-else description="没有符合搜索条件的实体" :image-size="60" />
-    <p v-if="entities.length > nodes.length" class="muted">画布显示前 {{ nodes.length }} 个匹配实体，可搜索定位其余实体；下表保留全部匹配结果。</p>
+    <p v-if="entities.length > nodes.length" class="muted">画布显示前 {{ nodes.length }} 个匹配实体，可搜索定位其余实体。</p>
     <section v-if="evidence.length" class="graph-evidence"><h4>来源证据</h4><div v-for="chunk in evidence" :key="chunk.source_id"><small>{{ chunk.file_path }} · 原资料 {{ chunk.origin_id }} · {{ chunk.source_id }}</small><pre>{{ chunk.content }}</pre></div></section>
+    <template v-if="showDetails">
     <div class="section-title spaced"><h4>实体标注</h4><el-button v-if="canEdit" @click="edit('entity')">新增实体</el-button></div>
     <el-table :data="entities" empty-text="暂无匹配实体"><el-table-column prop="entity_name" label="实体" min-width="120" /><el-table-column prop="entity_type" label="类型" width="90" /><el-table-column prop="description" label="说明" min-width="190" /><el-table-column label="操作" :width="canEdit ? 160 : 70"><template #default="{row}"><el-button link type="primary" @click="evidenceIds = row.source_ids">来源</el-button><el-button v-if="canEdit" link type="primary" @click="edit('entity',row)">编辑</el-button><el-button v-if="canEdit" link type="danger" @click="remove('entity',row)">删除</el-button></template></el-table-column></el-table>
     <div class="section-title spaced"><h4>关系标注</h4><el-button v-if="canEdit" :disabled="graph.entities.length < 2" @click="edit('relation')">新增关系</el-button></div>
     <el-table :data="graph.relationships" empty-text="暂无关系，可核对原文后新增"><el-table-column prop="src_id" label="起始实体" min-width="110" /><el-table-column prop="keywords" label="关系" min-width="110" /><el-table-column prop="tgt_id" label="目标实体" min-width="110" /><el-table-column prop="description" label="说明" min-width="200" /><el-table-column prop="weight" label="权重" width="65" /><el-table-column label="操作" :width="canEdit ? 160 : 70"><template #default="{row}"><el-button link type="primary" @click="evidenceIds = row.source_ids">来源</el-button><el-button v-if="canEdit" link type="primary" @click="edit('relation',row)">编辑</el-button><el-button v-if="canEdit" link type="danger" @click="remove('relation',row)">删除</el-button></template></el-table-column></el-table>
+    </template>
     <div v-if="canEdit" class="pipeline-actions"><span class="muted">{{ dirty ? '校订暂存中，保存后形成独立成果；删除实体会同时移除关联关系。' : '核对实体、关系与来源后另存成果。' }}</span><el-button type="primary" :disabled="!dirty && graph.reviewed" @click="save">保存图谱校订</el-button></div>
     <FormDialog v-model="dialog" :title="(editing === null ? '新增' : '编辑') + (kind === 'entity' ? '实体' : '关系')" :fields="fields" :initial="initial" @save="apply" />
   </div>

@@ -95,8 +95,22 @@ function continueBuild(type) {
   if (!selected.value || !requireAction('edit', selected.value.datasetId)) return
   state.ui.pipeline={datasetId:selected.value.datasetId,inputIds:[selected.value.id],generationType:type}
   state.focusVersion = selected.value.id
+  if (type === '问答人工复核' && !isDatasetVersion(selected.value) && ['问答生成', '问答增强'].includes(selected.value.type)) {
+    state.ui.preprocessingMode = selected.value.type
+    state.ui.preprocessingReview = { datasetId: selected.value.datasetId, versionId: selected.value.id }
+    emit('navigate', 'processing')
+    return
+  }
   if (type === '问答人工复核') state.ui.annotationMode=type
-  emit('navigate','generation')
+  if (['知识片段', '问答生成', '问答增强'].includes(type)) {
+    state.ui.preprocessingMode = type
+    emit('navigate', 'processing')
+  } else emit('navigate','generation')
+}
+function newQuestionTask() {
+  state.ui.pipeline = { datasetId: state.activeDataset, inputIds: [], generationType: '问答生成' }
+  state.ui.preprocessingMode = '问答生成'
+  emit('navigate', 'processing')
 }
 function exportLocal() {
   if (!selected.value || !requireAction('edit',selected.value.datasetId)) return
@@ -164,9 +178,9 @@ const qualityCode = `# 模拟生成的质检代码，仅供预览，不执行\nf
 </script>
 
 <template>
-  <section v-if="selected && page === 'versions'" class="panel local-result-actions"><div class="section-title"><div><h3>当前项目内的成果</h3><p>使用选中结果继续加工，发布前的内容保留在项目内。</p></div><el-button @click="openTaskRecords">任务记录</el-button></div><div class="toolbar"><el-dropdown @command="continueBuild"><el-button type="primary" :disabled="!allowed('edit')">继续建设<el-icon><ArrowDown /></el-icon></el-button><template #dropdown><el-dropdown-menu><el-dropdown-item v-if="selected.records.some(r => r.content)" command="知识片段">生成知识片段</el-dropdown-item><el-dropdown-item v-if="selected.records.some(r => r.content)" command="问答生成">生成问答</el-dropdown-item><el-dropdown-item v-if="selected.records.some(r => r.question)" command="问答人工复核">人工复核</el-dropdown-item></el-dropdown-menu></template></el-dropdown><span class="toolbar-spacer"></span><el-select v-model="exportSchema"><el-option value="原始结构" /><el-option value="Alpaca" /><el-option value="ShareGPT" /></el-select><el-select v-model="exportQuality" aria-label="导出质量范围"><el-option value="all" label="全部未过滤记录" /><el-option value="usable" label="仅人工确认可用" /></el-select><el-select v-model="exportFormat"><el-option value="json" label="JSON" /><el-option value="jsonl" label="JSONL" /></el-select><el-button :disabled="!allowed('edit')" @click="exportLocal">导出项目数据</el-button></div></section>
+  <section v-if="selected && page === 'versions'" class="panel local-result-actions"><div class="section-title"><div><h3>当前项目内的成果</h3><p>使用选中结果继续加工，发布前的内容保留在项目内。</p></div><el-button @click="openTaskRecords">任务记录</el-button></div><div class="toolbar"><el-dropdown @command="continueBuild"><el-button type="primary" :disabled="!allowed('edit')">继续建设<el-icon><ArrowDown /></el-icon></el-button><template #dropdown><el-dropdown-menu><el-dropdown-item v-if="selected.records.some(r => r.content)" command="知识片段">生成知识片段</el-dropdown-item><el-dropdown-item v-if="selected.records.some(r => r.content)" command="问答生成">生成问答</el-dropdown-item><el-dropdown-item v-if="selected.records.some(r => r.question) && isDatasetVersion(selected)" command="问答增强">SFT 问答对增强</el-dropdown-item><el-dropdown-item v-if="selected.records.some(r => r.question)" command="问答人工复核">人工复核</el-dropdown-item></el-dropdown-menu></template></el-dropdown><span class="toolbar-spacer"></span><el-select v-model="exportSchema"><el-option value="原始结构" /><el-option value="Alpaca" /><el-option value="ShareGPT" /></el-select><el-select v-model="exportQuality" aria-label="导出质量范围"><el-option value="all" label="全部未过滤记录" /><el-option value="usable" label="仅人工确认可用" /></el-select><el-select v-model="exportFormat"><el-option value="json" label="JSON" /><el-option value="jsonl" label="JSONL" /></el-select><el-button :disabled="!allowed('edit')" @click="exportLocal">导出项目数据</el-button></div></section>
   <section v-if="page === 'versions'" class="panel dataset-version-panel">
-    <div class="section-title"><div><h3>{{ datasetName(state.activeDataset) }}</h3><p>切换版本查看对应数据，问答生成默认创建新版本。</p></div><el-button type="primary" :disabled="!allowed('edit')" @click="$emit('navigate', 'generation')"><el-icon><Plus /></el-icon>生成问答</el-button></div>
+    <div class="section-title"><div><h3>{{ datasetName(state.activeDataset) }}</h3><p>切换版本查看对应数据，问答提取与增强经人工复核后保存为数据集成果。</p></div><el-button type="primary" :disabled="!allowed('edit')" @click="newQuestionTask"><el-icon><Plus /></el-icon>提取文本问答对</el-button></div>
     <el-tabs v-model="resultTab"><el-tab-pane :label="`数据集版本（${datasetVersions.length}）`" name="数据集版本" /><el-tab-pane :label="`加工成果（${processingResults.length}）`" name="加工成果" /></el-tabs>
     <template v-if="resultTab === '数据集版本'">
       <div class="version-switch-toolbar"><div><span class="muted">当前查阅版本</span><el-select v-model="selectedId" placeholder="选择数据集版本" class="version-select"><el-option v-for="version in datasetVersions" :key="version.id" :value="version.id" :label="`V${version.number}${version.release ? ` / ${version.release.tag}` : ''} · ${version.records.length}条 · ${version.status === '已发布' ? '发布版本' : version.status}`" /></el-select></div><div class="version-release-actions" v-if="selected">

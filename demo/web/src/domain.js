@@ -14,7 +14,7 @@ export function canDownload(version, requests, user, dataset) {
 }
 
 export function isDatasetVersion(result) {
-  return result?.kind ? result.kind === 'dataset' : !['PDF解析', 'Word解析', 'Excel解析', '文本清洗', '图片清洗', '知识片段', '图片描述', '图像标注', '自动标注'].includes(result?.type)
+  return result?.kind ? result.kind === 'dataset' : !['PDF解析', 'Word解析', 'Excel解析', '文本清洗', '图片清洗', '知识片段', '知识编译', '图片描述', '图像标注', '自动标注'].includes(result?.type)
 }
 
 export function createVersion(versions, datasetId, records, type, sourceId = '', kind = isDatasetVersion({ type }) ? 'dataset' : 'processing') {
@@ -80,9 +80,18 @@ export function publishVersion(version, details = {}, versions = [], publisher =
 }
 
 export function splitText(text, config) {
+  if (config.chunkType === '按段落' && config.paragraphsPerChunk != null) {
+    const count = Math.max(1, Math.floor(Number(config.paragraphsPerChunk) || 1))
+    const paragraphs = text.split(/\r?\n(?:[\t ]*\r?\n)+/).filter(part => part.trim())
+    return Array.from({ length: Math.ceil(paragraphs.length / count) }, (_, index) =>
+      paragraphs.slice(index * count, (index + 1) * count).join('\n\n'))
+  }
   const size = Math.max(1, Math.floor(Number(config.size) || 180))
   const separator = (config.separator || '\\n\\n').replace(/\\n/g, '\n').replace(/\\t/g, '\t')
-  const parts = config.chunkType === '分隔符' && separator ? text.split(separator) : [text]
+  const parts = config.chunkType === '按段落' ? text.split(/\r?\n[\t ]*\r?\n+/)
+    : config.chunkType === '分隔符' && separator ? text.split(separator) : [text]
+  // New delimiter tasks use the delimiter alone; old task snapshots retain their size limit.
+  if (config.chunkType === '分隔符' && config.size == null) return parts.filter(part => part.trim())
   const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null
   return parts.flatMap(part => {
     const characters = segmenter ? Array.from(segmenter.segment(part), entry => entry.segment) : Array.from(part)
@@ -97,7 +106,6 @@ export function cleanText(text, rules) {
   }
   if (rules.includes('隐私脱敏')) text = text.replace(/1[3-9]\d{9}/g, '***********').replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]+/g, '[邮箱已脱敏]')
   if (rules.includes('格式标准化')) text = text.replace(/[ \t]+/g, ' ').trim()
-  if (rules.includes('移除think标签')) text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
   return text
 }
 

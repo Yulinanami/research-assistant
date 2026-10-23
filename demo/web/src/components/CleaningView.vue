@@ -16,11 +16,12 @@ const rules = ref([])
 const minChars = ref(10)
 const imageConfig = ref({ minWidth: 300, minHeight: 200, minClarity: 60, maxWidth: 600, maxHeight: 600, imageFormat: 'PNG' })
 const useDemo = ref(false)
-const presetId = ref(state.settings.cleaningPresets[0]?.id || '')
-function applyPreset() {
-  const preset = state.settings.cleaningPresets.find(item=>item.id===presetId.value)
+function applyDefaultRules() {
+  const preset = state.settings.cleaningPresets[0]
   if (!preset || type.value !== '文本清洗') return
-  rules.value = [...preset.rules.map(name=>({name,enabled:true})),...['格式标准化','隐私脱敏','文档去重','质量过滤','移除think标签'].filter(name=>!preset.rules.includes(name)).map(name=>({name,enabled:false}))]
+  const availableRules = ['格式标准化','隐私脱敏','文档去重','质量过滤']
+  const presetRules = preset.rules.filter(name => availableRules.includes(name))
+  rules.value = [...presetRules.map(name=>({name,enabled:true})),...availableRules.filter(name=>!presetRules.includes(name)).map(name=>({name,enabled:false}))]
   minChars.value = preset.minChars || 10
 }
 const allInputs = computed(() => cleaningInputs(selectedSources(), selectedVersions(), state.activeDataset, state.ui.pipeline))
@@ -43,17 +44,14 @@ const blockingReason = computed(() => {
     ? '上一步选择的资料与当前清洗类型不匹配或已更新，请重新勾选可用资料。'
     : '请先在上方资料列表中勾选需要清洗的资料。'
   if (allInputs.value.some(input => input.kind === 'structured')) return '当前没有可清洗的文本或图片条目；问答等结构化数据可以直接进入数据标注。'
-  return `暂无可用的${type.value === '文本清洗' ? '文本' : '图片'}资料，请切换清洗类型，或先接入并解析资料。`
+  return `暂无可用的${type.value === '文本清洗' ? '文本' : '图片'}资料，请切换清洗类型或接入资料；文档自动解析状态可在任务管理中心查看。`
 })
 const canExecute = computed(() => !blockingReason.value)
 const ruleDescriptions = {
-  '文档去重': '清理文档内重复内容，并在本批资料中去除完全相同的文档。',
-  '格式标准化': '规范文本空白，或展示图片的目标尺寸与格式。',
-  '隐私脱敏': '替换文本中的手机号和邮箱。',
-  '质量过滤': '按清洗到当前步骤时的内容长度筛选资料。',
-  '移除think标签': '移除 think 标签及其中的内容。',
-  '重复图片去重': '按图片内容筛除本批次中的重复图片。',
-  '质量筛选': '按演示尺寸与清晰度筛选图片。',
+  '格式标准化': '合并多余空格与制表符，清除首尾空白。',
+  '文档去重': '清理文档内重复内容，并去除本批次完全相同的文档。',
+  '隐私脱敏': '替换文本中的手机号和邮箱，隐藏个人信息。',
+  '质量过滤': '过滤内容长度低于设定值的文本。',
 }
 function matchesRequested(input) {
   return requestedIds.value.some(id => [input.id, input.originId, input.inputId].includes(id))
@@ -68,12 +66,12 @@ function resetMode(useHandoff = true) {
   requestedIds.value = useHandoff && previous?.datasetId === state.activeDataset && Array.isArray(previous.inputIds) ? [...previous.inputIds] : []
   selectionEdited.value = false
   selectedIds.value = available.value.filter(input => !requestedIds.value.length || matchesRequested(input)).map(input => input.id)
-  rules.value = (type.value === '文本清洗' ? ['格式标准化', '隐私脱敏', '文档去重', '质量过滤', '移除think标签'] : ['重复图片去重', '质量筛选', '格式标准化']).map(name => ({ name, enabled: name !== '质量过滤' && name !== '移除think标签' }))
+  rules.value = (type.value === '文本清洗' ? ['格式标准化', '隐私脱敏', '文档去重', '质量过滤'] : ['重复图片去重', '质量筛选', '格式标准化']).map(name => ({ name, enabled: name !== '质量过滤' }))
   useDemo.value = false
   trial.value = null
   previewIndex.value = 0
   taskId.value = ''
-  if (type.value === '文本清洗') applyPreset()
+  if (type.value === '文本清洗') applyDefaultRules()
 }
 let resettingDataset = false
 watch(type, () => { if (!resettingDataset) resetMode(false) }, { flush: 'sync' })
@@ -117,7 +115,8 @@ function continueGeneration() {
   if (!output.value || !kept.value.length) return ElMessage.warning('本次没有保留的数据，请调整规则后重试')
   state.ui.pipeline = { datasetId: state.activeDataset, inputIds: [output.value.id], generationType: output.value.type === '图片清洗' ? '图片分类' : '知识片段' }
   state.focusVersion = output.value.id
-  emit('navigate', 'generation')
+  if (output.value.type === '图片清洗') emit('navigate', 'generation')
+  else { state.ui.preprocessingMode = '知识片段'; emit('navigate', 'processing') }
 }
 function showOutput(versionId) { state.focusVersion = versionId; emit('navigate', 'versions') }
 </script>
@@ -125,27 +124,25 @@ function showOutput(versionId) { state.focusVersion = versionId; emit('navigate'
 <template>
   <div class="pipeline-stack cleaning-workspace">
     <section class="panel pipeline-card">
-      <div class="pipeline-card-heading"><span class="pipeline-marker">01</span><div><h3>选择清洗资料</h3><p>接续文档解析结果，或选择文本与图片，原始文件保留。</p></div><el-button @click="$emit('navigate', 'processing')">返回文档解析</el-button></div>
+      <div class="pipeline-card-heading"><span class="pipeline-marker">01</span><div><h3>选择清洗资料</h3></div><el-button @click="$emit('navigate', 'sources')">返回语料接入</el-button></div>
       <div class="cleaning-type-options" role="group" aria-label="清洗类型">
         <button v-for="option in ['文本清洗', '图片清洗']" :key="option" :class="['cleaning-type-card', { selected: type === option }]" :aria-pressed="type === option" :disabled="running" @click="type = option">
           <span class="icon-tile" :class="option === '文本清洗' ? 'blue' : 'teal'"><el-icon><component :is="option === '文本清洗' ? 'Document' : 'Picture'" /></el-icon></span>
-          <span><b>{{ option }}</b><small>{{ option === '文本清洗' ? '规范、脱敏、过滤与去重' : '去重、质量筛选与格式规范' }}</small></span><span class="cleaning-choice-dot"></span>
+          <span><b>{{ option }}</b></span><span class="cleaning-choice-dot"></span>
         </button>
       </div>
       <el-checkbox-group v-model="selectedIds" class="pipeline-input-list" :disabled="running" @change="selectionEdited = true">
-        <label v-for="input in available" :key="input.id" class="pipeline-input-row"><el-checkbox :value="input.id">{{ input.name }}</el-checkbox><el-tag type="info">{{ input.stage }}</el-tag><small>{{ input.parser ? '使用文档解析结果' : '使用接入内容' }}</small></label>
+        <label v-for="input in available" :key="input.id" class="pipeline-input-row"><el-checkbox :value="input.id">{{ input.name }}</el-checkbox></label>
       </el-checkbox-group>
-      <el-empty v-if="!available.length" description="暂无此类型的可用资料，请先在文档解析页签完成解析，或到语料接入上传文件" :image-size="60" />
+      <el-empty v-if="!available.length" description="暂无可用资料，请接入或等待解析完成" :image-size="60" />
       <el-checkbox v-if="type === '图片清洗'" v-model="useDemo" :disabled="running">加入内置演示图片组（重复、低分辨率、模糊样例）</el-checkbox>
-      <p class="pipeline-note">本次选择 {{ inputs.length }} 份资料{{ allInputs.some(input => !input.ready) ? '；未解析的文档需先在文档解析页签处理。' : '，处理结果将保留各自来源。' }}</p>
     </section>
 
     <section class="panel pipeline-card">
-      <div class="pipeline-card-heading"><span class="pipeline-marker">02</span><div><h3>配置清洗流水线</h3><p>从上到下执行；可以启用步骤、调整顺序，并先试运行查看样本变化。</p></div><el-tag type="info">模拟执行</el-tag></div>
-      <div v-if="type === '文本清洗'" class="toolbar"><el-select v-model="presetId" :disabled="running" placeholder="选择常用配置"><el-option v-for="preset in state.settings.cleaningPresets" :key="preset.id" :value="preset.id" :label="preset.name" /></el-select><el-button :disabled="running || !allowed('edit')" @click="applyPreset">应用预设</el-button><el-button text @click="$emit('navigate','settings')">管理常用配置</el-button></div>
-      <div class="cleaning-rule-list">
+      <div class="pipeline-card-heading"><span class="pipeline-marker">02</span><div><h3>勾选清洗版块</h3></div><el-tag type="info">模拟执行</el-tag></div>
+      <div class="cleaning-rule-list cleaning-rule-modules">
         <div v-for="(rule, index) in rules" :key="rule.name" :class="['cleaning-rule', { disabled: !rule.enabled }]">
-          <span class="cleaning-rule-order">{{ String(index + 1).padStart(2, '0') }}</span><div class="cleaning-rule-body"><el-checkbox v-model="rule.enabled" :disabled="running">{{ rule.name }}</el-checkbox><p>{{ ruleDescriptions[rule.name] }}</p></div>
+          <span class="cleaning-rule-order">{{ String(index + 1).padStart(2, '0') }}</span><div class="cleaning-rule-body"><el-checkbox v-model="rule.enabled" :disabled="running">{{ rule.name }}</el-checkbox><p v-if="type === '文本清洗'">{{ ruleDescriptions[rule.name] }}</p></div>
           <div class="cleaning-rule-move"><el-button text :disabled="running || index === 0" :aria-label="`上移${rule.name}`" @click="moveRule(index, -1)">↑</el-button><el-button text :disabled="running || index === rules.length - 1" :aria-label="`下移${rule.name}`" @click="moveRule(index, 1)">↓</el-button></div>
         </div>
       </div>
@@ -158,22 +155,22 @@ function showOutput(versionId) { state.focusVersion = versionId; emit('navigate'
         <p class="pipeline-note">上传图片使用演示尺寸 900×500、清晰度 90；格式与尺寸仅展示目标信息，未转换图片文件。</p>
       </template>
       <p v-if="blockingReason" class="pipeline-note" role="status">{{ blockingReason }}</p>
-      <div class="pipeline-actions"><span class="muted">已启用 {{ config.rules.length }} 个步骤 · 试运行最多取前 5 份资料</span><el-button v-if="!inputs.length && available.length && !running && allowed('edit')" @click="selectAllInputs">选择可用资料</el-button><el-button :disabled="!canExecute" @click="trySample">小样本试运行</el-button><el-button type="primary" :loading="running" :disabled="!canExecute" @click="execute">{{ running ? '正在清洗' : '执行批量清洗' }}</el-button></div>
-      <div v-if="trial" class="cleaning-trial"><h4>试运行结果 <small>仅处理前 {{ trial.length }} 份，不代表全部资料的筛选统计</small></h4><el-table :data="trial"><el-table-column prop="title" label="输入资料" /><el-table-column prop="status" label="结果" width="90" /><el-table-column prop="reason" label="说明" /></el-table><details v-for="(record, index) in trial" :key="index"><summary>{{ record.title }} · 查看处理前后</summary><div class="two-cols"><template v-if="type === '文本清洗'"><pre>{{ record.before }}</pre><pre>{{ record.content }}</pre></template><template v-else><el-image :src="record.image" fit="contain" class="cleaning-image" /><pre>{{ JSON.stringify({ before: record.before, after: record.after }, null, 2) }}</pre></template></div></details></div>
+      <div class="pipeline-actions"><el-button v-if="!inputs.length && available.length && !running && allowed('edit')" @click="selectAllInputs">选择可用资料</el-button><el-button :disabled="!canExecute" @click="trySample">小样本试运行</el-button><el-button type="primary" :loading="running" :disabled="!canExecute" @click="execute">{{ running ? '正在清洗' : '执行批量清洗' }}</el-button></div>
+      <div v-if="trial" class="cleaning-trial"><h4>试运行结果 </h4><el-table :data="trial"><el-table-column prop="title" label="输入资料" /><el-table-column prop="status" label="结果" width="90" /><el-table-column prop="reason" label="说明" /></el-table><details v-for="(record, index) in trial" :key="index"><summary>{{ record.title }} · 查看处理前后</summary><div class="two-cols"><template v-if="type === '文本清洗'"><pre>{{ record.before }}</pre><pre>{{ record.content }}</pre></template><template v-else><el-image :src="record.image" fit="contain" class="cleaning-image" /><pre>{{ JSON.stringify({ before: record.before, after: record.after }, null, 2) }}</pre></template></div></details></div>
     </section>
 
     <section class="panel pipeline-card">
-      <div class="pipeline-card-heading"><span class="pipeline-marker">03</span><div><h3>查看结果并继续加工</h3><p>{{ task ? task.name : '执行完成后在此查看保留数据、过滤原因与处理前后变化。' }}</p></div><el-tag v-if="task" :type="task.status === '失败' ? 'danger' : task.status === '已完成' ? 'success' : 'info'">{{ task.status }}</el-tag></div>
+      <div class="pipeline-card-heading"><span class="pipeline-marker">03</span><div><h3>查看结果并继续加工</h3></div><el-tag v-if="task" :type="task.status === '失败' ? 'danger' : task.status === '已完成' ? 'success' : 'info'">{{ task.status }}</el-tag></div>
       <el-progress v-if="task" :percentage="task.progress" :status="task.status === '失败' ? 'exception' : undefined" />
       <template v-if="output">
         <div class="pipeline-metrics"><div><small>输入资料</small><b>{{ output.records.length }}</b></div><div><small>保留</small><b>{{ kept.length }}</b></div><div><small>过滤</small><b>{{ output.records.length - kept.length }}</b></div></div>
         <el-table :data="output.records" highlight-current-row @row-click="row => previewIndex = output.records.indexOf(row)"><el-table-column prop="title" label="输入资料" /><el-table-column prop="status" label="结果" width="90" /><el-table-column prop="reason" label="说明" /></el-table>
         <div v-if="previewRecord" class="cleaning-result-preview"><p class="pipeline-preview-name">{{ previewRecord.title }} · 处理前后</p><div class="two-cols"><template v-if="output.type === '文本清洗'"><div><small>处理前</small><pre>{{ previewRecord.before }}</pre></div><div><small>处理后 · {{ previewRecord.status }}</small><pre>{{ previewRecord.content }}</pre></div></template><template v-else><div><small>处理前</small><el-image :src="previewRecord.image" fit="contain" class="cleaning-image" /></div><div><small>处理后 · {{ previewRecord.status }}</small><el-image v-if="previewRecord.after" :src="previewRecord.image" fit="contain" class="cleaning-image" /><pre>{{ previewRecord.after ? JSON.stringify(previewRecord.after, null, 2) : previewRecord.reason }}</pre><small v-if="previewRecord.after">目标信息为模拟，预览沿用原图。</small></div></template></div></div>
-        <div class="pipeline-actions"><el-button @click="showOutput(output.id)">查看完整成果</el-button><el-button type="primary" :disabled="!kept.length || !allowed('edit')" @click="continueGeneration">下一步：数据标注<el-icon><ArrowRight /></el-icon></el-button></div>
+        <div class="pipeline-actions"><el-button @click="showOutput(output.id)">查看完整成果</el-button><el-button type="primary" :disabled="!kept.length || !allowed('edit')" @click="continueGeneration">下一步：{{ output.type === '图片清洗' ? '图片标注' : '知识片段生成' }}<el-icon><ArrowRight /></el-icon></el-button></div>
       </template>
       <el-empty v-else-if="!running" :description="task?.status === '失败' ? '清洗失败，请检查输入并重新执行' : '尚无本次清洗结果'" :image-size="65" />
       <details v-if="task" class="cleaning-logs"><summary>执行日志</summary><pre>{{ task.logs.join('\n') }}</pre></details>
     </section>
   </div>
-  <section class="panel cleaning-history-entry"><span class="muted">清洗任务记录集中保存在任务管理中心。</span><el-button @click="openHistory">查看清洗记录<el-icon><ArrowRight /></el-icon></el-button></section>
+  <section class="panel cleaning-history-entry"><el-button @click="openHistory">查看清洗记录<el-icon><ArrowRight /></el-icon></el-button></section>
 </template>

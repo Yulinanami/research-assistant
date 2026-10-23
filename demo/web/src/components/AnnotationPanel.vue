@@ -1,13 +1,14 @@
 <script setup>
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { state, selectedVersions, selectedSources, addVersion, requireAction, notify, runTask, allowed, taskName, submitForReview } from '../store'
+import { state, selectedVersions, selectedSources, addVersion, requireAction, notify, runTask, allowed, taskName, submitAnnotationResult } from '../store'
 import { uid, isDatasetVersion } from '../domain'
-import { reviewInput, recordAnnotationTask, effectiveAnswer, qualityLabels, questionEntries, mergeQuestionEntries, validateQuestions, validateBoxes } from '../annotation'
+import { reviewInput, isQuestionReviewInput, questionReviewOrigin, recordAnnotationTask, effectiveAnswer, qualityLabels, questionEntries, mergeQuestionEntries, validateQuestions, validateBoxes } from '../annotation'
 import { classificationInputs } from '../workspace'
 import AnnotationImport from './AnnotationImport.vue'
-const emit = defineEmits(['navigate', 'mode'])
-const props = defineProps({ initialTab: { type: String, default: '问答标注' } })
+import { taskPrompt } from '../promptConfig'
+const emit = defineEmits(['navigate', 'mode', 'completed', 'review'])
+const props = defineProps({ initialTab: { type: String, default: '问答标注' }, localReview: Boolean })
 const clone = value => JSON.parse(JSON.stringify(value))
 const tab = ref(props.initialTab)
 const versionId = ref('')
@@ -19,7 +20,7 @@ const inputStamp = ref('')
 const draftId = ref('')
 const baseVersionId = ref('')
 const labels = ref([...qualityLabels])
-const prompt = ref('根据参考材料判断答案质量，建议标签并说明需要修改的内容。')
+const prompt = ref(taskPrompt(state.settings, '自动标注'))
 const model = ref(state.models.find(item => item.status === '已上架')?.id || '')
 const imageId = ref('')
 const boxLabel = ref('图')
@@ -33,7 +34,7 @@ const task = ref(null)
 const autoTaskId = ref('')
 const autoTask = computed(() => state.tasks.find(item => item.id === autoTaskId.value && item.datasetId === state.activeDataset))
 const autoRunning = computed(() => autoTask.value?.status === '执行中')
-const versions = computed(() => selectedVersions().filter(v => questionEntries(v).records.length && (isDatasetVersion(v) || v.type === '自动标注')))
+const versions = computed(() => selectedVersions().filter(isQuestionReviewInput))
 const current = computed(() => records.value[index.value])
 const images = computed(() => {
   const inputs = classificationInputs('image', selectedSources(), selectedVersions(), state.activeDataset, state.ui.pipeline)
@@ -179,7 +180,15 @@ function save(submit = false, quiet = false) {
   task.value = annotationTask
   inputStamp.value = JSON.stringify(version.records)
   baseline.value = JSON.stringify(tab.value === '问答标注' ? records.value : boxes.value)
-  if (submit) { if (submitForReview(version)) { task.value.status = '已提交'; emit('navigate', 'audit') } }
+  if (submit && props.localReview) {
+    const origin = questionReviewOrigin(input, selectedVersions())
+    if (origin) { origin.reviewedVersionId = version.id; version.reviewSourceId = origin.id }
+    task.value.status = '已完成'; task.value.completedAt = Date.now()
+    task.value.logs.push('人工复核已完成，已保存为项目内数据集成果。')
+    notify('人工复核已完成，数据集成果已保存到项目内')
+    emit('completed', version.id)
+  }
+  else if (submit) { if (submitAnnotationResult(version)) { task.value.status = '已提交'; emit('review', version.id) } }
   else if (!quiet) notify('标注草稿已保存')
   return version
 }
@@ -226,9 +235,9 @@ function pointerUp(event) {
   <section class="panel">
     <div class="section-title"><h3>{{ tab === '问答标注' ? '问答人工复核' : '图片区域标注' }}</h3><AnnotationImport v-if="tab === '图像标注'" ref="uploader" kind="image" @imported="imported" /></div>
     <div class="toolbar">
-      <el-select v-if="tab === '问答标注'" :model-value="versionId" @change="changeInput" placeholder="选择问答成果版本" aria-label="选择问答成果版本" class="wide-select"><el-option v-for="version in versions" :key="version.id" :label="(isDatasetVersion(version) ? 'V' + version.number : '模型标注建议') + ' · ' + version.type + ' · ' + version.records.length + '条'" :value="version.id" /></el-select>
+      <el-select v-if="tab === '问答标注'" :model-value="versionId" @change="changeInput" placeholder="选择问答成果版本" aria-label="选择问答成果版本" class="wide-select"><el-option v-for="version in versions" :key="version.id" :label="(isDatasetVersion(version) ? 'V' + version.number : version.type === '自动标注' ? '模型标注建议' : '待复核问答') + ' · ' + version.type + ' · ' + version.records.length + '条'" :value="version.id" /></el-select>
       <el-select v-else :model-value="imageId" @change="changeInput" placeholder="选择图片" aria-label="选择框选图片"><el-option v-for="item in images" :key="item.id" :label="item.name" :value="item.id" /></el-select>
-      <span class="toolbar-spacer"></span><el-button :disabled="!allowed('edit') || (tab === '问答标注' ? !records.length : !currentImage)" @click="save(false)">保存草稿</el-button><el-button type="primary" :disabled="!allowed('edit') || (tab === '问答标注' ? !records.length : !currentImage)" @click="save(true)">提交审核<el-icon><ArrowRight /></el-icon></el-button>
+      <span class="toolbar-spacer"></span><el-button :disabled="!allowed('edit') || (tab === '问答标注' ? !records.length : !currentImage)" @click="save(false)">保存草稿</el-button><el-button type="primary" :disabled="!allowed('edit') || (tab === '问答标注' ? !records.length : !currentImage)" @click="save(true)">{{ localReview ? '提交为数据集成果' : '提交审核' }}<el-icon><ArrowRight /></el-icon></el-button>
     </div>
   </section>
   <template v-if="tab === '问答标注'">

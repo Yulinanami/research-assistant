@@ -23,6 +23,22 @@ export function questionEntries(version) {
   return { records, indices }
 }
 
+export function isQuestionReviewInput(version) {
+  return Boolean(version && (isDatasetVersion(version) || ['自动标注', '问答生成', '问答增强'].includes(version.type))
+    && questionEntries(version).records.length)
+}
+
+export function questionReviewOrigin(version, versions) {
+  const seen = new Set()
+  let current = version
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id)
+    if (!isDatasetVersion(current) && ['问答生成', '问答增强'].includes(current.type)) return current
+    current = versions.find(item => item.datasetId === version.datasetId
+      && item.id === (current.reviewSourceId || current.sourceId || current.parentVersionId))
+  }
+}
+
 export function mergeQuestionEntries(version, records, indices) {
   const output = JSON.parse(JSON.stringify(version.records))
   if (records.length !== indices.length || indices.some(index => !output[index]?.question)) throw new Error('复核输入已变化，请重新打开成果')
@@ -58,8 +74,7 @@ export function editAnswerRecord(record, changes) {
 }
 
 export function reviewInput(versions, datasetId, preferredId, inputIds = []) {
-  const candidates = versions.filter(version => version.datasetId === datasetId
-    && (isDatasetVersion(version) || version.type === '自动标注') && questionEntries(version).records.length)
+  const candidates = versions.filter(version => version.datasetId === datasetId && isQuestionReviewInput(version))
   return candidates.find(version => version.id === preferredId)
     || inputIds.map(id => candidates.find(version => version.id === id)).find(Boolean)
     || candidates[0]

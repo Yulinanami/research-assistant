@@ -48,22 +48,10 @@ function inspectDataset() {checkGovernance(checkOperation.value,{datasetId:targe
 function edit(row) {
   if (!requireAction('edit')) return
   const dictionary = tab.value === '数据字典'
-  fields.value = tab.value==='内容标准模板' ? [{key:'name',label:'模板名称',required:true},{key:'termIds',label:'引用字段字典',type:'select',multiple:true,required:true,options:state.terms.map(term=>({label:`${term.name} (${term.field})`,value:term.id})),default:[]}] : dictionary ? [
-    { key:'name',label:'术语名称',required:true },{ key:'field',label:'关联字段',required:true },{ key:'type',label:'字段类型',type:'select',options:['数值','文本','日期','布尔'],default:'数值' },{ key:'unit',label:'单位' },{ key:'description',label:'定义与说明',type:'textarea',required:true },
-    {key:'required',label:'必填',type:'switch',default:true},{key:'unique',label:'版本内唯一',type:'switch',default:false},{key:'allowedValues',label:'允许值（逗号分隔）'},{key:'checkRange',label:'检查长度 / 数值范围',type:'switch',default:false},{key:'min',label:'最小长度 / 最小数值',type:'number',min:-100000,default:0},{key:'max',label:'最大长度 / 最大数值',type:'number',min:-100000,default:200},{key:'severity',label:'问题等级',type:'select',options:['阻断','提醒'],default:'阻断'},{key:'enabled',label:'启用',type:'switch',default:true},
-  ] : tab.value === '元数据规范' ? [
-    {key:'name',label:'规则名称',required:true}, {key:'field',label:'数据集字段',type:'select',options:fieldOptions,required:true},
-    {key:'dataType',label:'字段类型',type:'select',options:['文本','数值','日期','布尔'],default:'文本'},
-    {key:'required',label:'必填',type:'switch',default:true}, {key:'allowedValues',label:'允许值（逗号分隔）'},
-    {key:'min',label:'最小长度 / 最小数值',type:'number',min:0,default:0}, {key:'max',label:'最大长度 / 最大数值',type:'number',min:0,default:500},
-  ] : tab.value === '全流程标准' ? [
-    {key:'name',label:'标准名称',required:true},{key:'executionMode',label:'执行方式',type:'select',options:['自动校验','人工确认',{label:'系统策略',value:'后端保障'}],default:'自动校验'}, {key:'stages',label:'执行环节',type:'checks',options:['采集','存储','共享','安全'],required:true},
-    {key:'metadataFields',label:'关联元数据规则',type:'select',multiple:true,options:metadataOptions.value,default:[]},
-    {key:'fileTypes',label:'采集允许格式（逗号分隔，留空不限）'}, {key:'maxMB',label:'采集单文件上限（MB，0不限）',type:'number',min:0,default:50},
-    {key:'internalSharing',label:'内部数据共享策略',type:'select',options:['申请授权','禁止共享'],default:'申请授权'},
-    {key:'action',label:'不符合规则时',type:'select',options:['阻止操作','仅提示'],default:'阻止操作'},
-  ] : []
-  if (['元数据规范','全流程标准'].includes(tab.value)) fields.value.push({key:'scope',label:'适用数据类型',type:'select',options:['全部类型',...new Set(state.datasets.map(d=>d.type))],default:'全部类型'},{key:'enabled',label:'启用',type:'switch',default:true},{key:'description',label:'补充说明',type:'textarea'})
+  fields.value = dictionary ? [
+    { key: 'name', label: '字段名称', required: true }, { key: 'field', label: '字段编码', required: true }, {key:'scope',label:'作用范围',type:'select',options:[{value:'dataset',label:'数据集元数据'},{value:'sample',label:'样本业务字段'}],default:'dataset'}, { key: 'type', label: '字段类型', type: 'select', options: ['数值', '文本', '枚举', '日期', '布尔'], default: '文本' }, {key:'enumValues',label:'枚举值（逗号分隔）'}, {key:'required',label:'必填字段',type:'switch',default:false}, { key: 'unit', label: '单位' }, { key: 'description', label: '定义与说明', type: 'textarea', required: true },
+  ] : [{ key: 'name', label: '名称', required: true }, { key: 'description', label: tab.value === '场景清洗流程' ? '场景与处理步骤' : '规范内容', type: 'textarea', rows: 7, required: true }]
+  if (tab.value === '场景清洗流程') fields.value.push({ key: 'rules', label: '清洗步骤', type: 'checks', options: ['文档去重', '质量过滤', '隐私脱敏', '格式标准化'], default: ['文档去重', '格式标准化'] })
   initial.value = row || {}; dialogTitle.value = `${row ? '编辑' : '新增'}${tab.value}`
   handler = data => {
     if (dictionary) {

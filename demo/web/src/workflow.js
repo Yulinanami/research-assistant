@@ -33,8 +33,8 @@ export function preparationInputs(sources, versions, datasetId) {
     const ready = Boolean(content.trim()) && (image || !content.startsWith('data:'))
     return { id: parsed?.id || source.id, originId: source.id, name: source.name,
       kind: image ? 'image' : 'text', content, ready, parser,
-      stage: parser ? parsed ? '已解析' : '待解析' : ready ? '可直接处理' : '内容不可用',
-      reason: ready ? '' : parser ? '请先在数据预处理中完成解析' : '请检查文件格式和内容',
+      stage: parser ? parsed ? '已解析' : source.status === '解析中' ? '解析中' : source.status === '解析失败' ? '解析失败' : '待自动解析' : ready ? '可直接处理' : '内容不可用',
+      reason: ready ? '' : parser ? source.status === '解析失败' ? '自动解析失败，请在任务管理中心查看并重试' : '接入后自动解析，完成后即可继续清洗或标注' : '请检查文件格式和内容',
     }
   })
 }

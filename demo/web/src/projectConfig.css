@@ -1,0 +1,39 @@
+.project-config-dialog .el-dialog__body { max-height: 70vh; overflow: auto; }
+.project-basics-form { max-width: 860px; padding-top: 6px; }
+.project-basics-form > .el-form-item { margin-bottom: 22px; }
+.project-basics-form .el-select { width: 100%; }
+.project-visibility-options { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); width: 100%; gap: 12px; }
+.project-visibility-options .el-radio.is-bordered { height: auto; min-height: 100px; margin: 0; padding: 16px; align-items: flex-start; border-radius: 9px; }
+.project-visibility-options .el-radio__input { margin-top: 4px; }
+.project-visibility-options .el-radio__label { white-space: normal; line-height: 1.7; padding-left: 10px; }
+.project-visibility-options b { display: block; color: #3f5779; font-size: 13px; }
+.project-visibility-options small { display: block; margin-top: 7px; color: #8594aa; font-size: 11px; }
+.project-visibility-options .el-radio.is-checked { background: #f2f7ff; border-color: #4d82e8; }
+.project-config-note { color: #8898af; font-size: 12px; line-height: 1.9; margin: 14px 0 20px; }
+.dictionary-editor-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 4px 0 18px; }
+.dictionary-workspace { display: grid; grid-template-columns: minmax(280px,.9fr) minmax(0,1.1fr); border: 1px solid #e1e8f3; border-radius: 10px; overflow: hidden; background: #fff; }
+.dictionary-configuration, .dictionary-preview { min-width: 0; min-height: 390px; max-height: 56vh; overflow: auto; padding: 22px; }
+.dictionary-configuration { border-right: 1px solid #e1e8f3; }
+.dictionary-preview { background: #f8faff; }
+.dictionary-section-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 18px; }
+.dictionary-section-heading h4 { margin: 0; color: #3d577d; font-size: 14px; }
+.dictionary-section-heading h4 small { display: inline-block; margin-left: 6px; padding: 2px 7px; background: #eef3fb; border-radius: 5px; color: #8394ad; }
+.dictionary-field-form { margin-top: 22px; }
+.dictionary-field-form .el-select, .dictionary-preview-form .el-select, .dictionary-preview-form .el-date-editor.el-input { width: 100%; }
+.dictionary-field-form .el-form-item { margin-bottom: 20px; }
+.dictionary-enum-options { display: flex; flex-wrap: wrap; gap: 7px; width: 100%; margin: 10px 0; }
+.dictionary-preview-form .el-form-item { padding: 13px; margin: 0 0 14px; border: 1px solid transparent; border-radius: 8px; }
+.dictionary-preview-form .dictionary-preview-selected { background: #fff; border-color: #ccdcf6; box-shadow: 0 2px 7px #31589508; }
+.dictionary-batch-add, .dictionary-data-preview { margin-top: 24px; border-top: 1px solid #e5ebf5; padding-top: 18px; }
+.dictionary-batch-add summary, .dictionary-data-preview summary { color: #627b9f; font-size: 12px; cursor: pointer; margin-bottom: 14px; }
+.dictionary-data-preview pre { padding: 15px; color: #557094; line-height: 1.8; font-size: 11px; background: #fff; border: 1px solid #e4ebf5; border-radius: 7px; max-height: 230px; overflow: auto; white-space: pre-wrap; }
+.dictionary-code-editor textarea { font-family: Consolas, monospace; font-size: 12px; line-height: 1.7; tab-size: 2; }
+.dictionary-code-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.dictionary-code-error { color: #d94f4f; line-height: 1.7; font-size: 12px; margin-top: 12px; }
+.dictionary-template-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); gap: 14px; }
+.dictionary-template-list article { padding: 19px; border: 1px solid #e0e8f4; border-radius: 9px; }
+.dictionary-template-list h4 { color: #425d83; margin: 0 0 12px; }
+.dictionary-template-list p { min-height: 44px; color: #90a0b5; line-height: 1.8; font-size: 12px; }
+.dictionary-template-list .el-button { margin-top: 12px; }
+@media(max-width:700px) { .project-visibility-options { grid-template-columns: 1fr; } .project-visibility-options .el-radio.is-bordered { min-height: 75px; } }
+@media(max-width:800px) { .dictionary-workspace { grid-template-columns: 1fr; } .dictionary-configuration,.dictionary-preview { max-height: none; min-height: 0; } .dictionary-configuration { border-right: 0; border-bottom: 1px solid #e1e8f3; } }

@@ -1,0 +1,15 @@
+.prompt-config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.prompt-config-card { min-width: 0; padding: 20px; background: #fbfcff; border: 1px solid #e2eaf5; border-radius: 10px; }
+.prompt-config-card .section-title { margin-bottom: 12px; }
+.prompt-config-card h4 { color: #405a7d; }
+.annotation-result-review .el-pagination { margin-top: 20px; justify-content: flex-end; }
+.annotation-review-decision { margin-top: 24px; padding: 20px; background: #f7faff; border: 1px solid #e4ecf8; border-radius: 10px; }
+.annotation-review-criteria { margin-top: 20px; color: #6e839e; font-size: 12px; }
+.annotation-review-criteria summary { cursor: pointer; }
+.annotation-review-criteria pre { white-space: pre-wrap; line-height: 1.9; padding: 15px; }
+.annotation-review-history { margin-top: 24px; }
+.review-image { position: relative; width: min(100%, 720px); margin: 20px 0; }
+.review-image > img { display: block; width: 100%; height: auto; }
+.review-image-box { position: absolute; border: 2px solid #2d74ef; color: #154ca5; font-size: 12px; background: #3168f515; }
+.review-answer { white-space: pre-wrap; line-height: 1.9; margin: 18px 0; }
+@media (max-width: 850px) { .prompt-config-grid { grid-template-columns: 1fr; } }
