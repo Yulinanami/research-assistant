@@ -19,7 +19,7 @@ import ProjectFlowConfig from './components/ProjectFlowConfig.vue'
 import ProjectConfigDialog from './components/ProjectConfigDialog.vue'
 import SettingsView from './components/SettingsView.vue'
 import PublicHome from './components/PublicHome.vue'
-import { auth, loginDemo, logoutDemo, resolveSessionPage } from './auth'
+import { auth, loginDemo, logoutDemo, resolveSessionPage, saveLoginReturn, takeLoginReturn } from './auth'
 const internalPages = [
   { id:'planning', title:'需求与数据规划', subtitle:'明确当前项目的数据用途、结构与质量要求' },
   { id:'sources', title:'数据采集与语料管理', subtitle:'在当前项目导入和管理资料，保留原始文件与来源' },
@@ -69,7 +69,14 @@ watch(() => state.activeDataset, id => {
 async function reset() {
   try { await ElMessageBox.confirm('清除本演示数据、文件与操作记录，并恢复初始样例？','重置演示',{type:'warning'}); await resetDemo(); navigate('workbench') } catch {}
 }
-function login(role) { loginDemo(role); state.role = role; ensureContext(); navigate('workbench') }
+function requestLogin(target) { saveLoginReturn(target); navigate('login') }
+function browseDataset(datasetId) { publicFocus.value = {datasetId}; navigate('square') }
+function login(role) {
+  const target = takeLoginReturn()
+  loginDemo(role); state.role = role; ensureContext()
+  publicFocus.value = target
+  navigate(target ? 'square' : 'workbench')
+}
 function logout() { logoutDemo(); ElMessage.closeAll(); navigate('home') }
 function userCommand(command) { if (command === 'logout') logout(); else if (command === 'reset') reset(); else state.role = command }
 function syncRoute() {
@@ -79,7 +86,7 @@ function syncRoute() {
 onMounted(async () => { await initialize(); ensureContext(); syncRoute(); window.addEventListener('hashchange', syncRoute) })
 </script>
 <template>
-  <PublicHome v-if="!auth.session" @login="login" />
+  <PublicHome v-if="!auth.session" :page="page" :focus="publicFocus" @login="login" @navigate="navigate" @request-login="requestLogin" @browse="browseDataset" />
   <div v-else class="app-shell" :class="{collapsed}">
     <aside class="sidebar">
       <a class="brand" href="#workbench" @click.prevent="navigate('workbench')"><span class="brand-mark"><el-icon><DataLine /></el-icon></span><span v-if="!collapsed"><b>研数</b><small>科研数据建设与共享</small></span></a>
@@ -110,7 +117,7 @@ onMounted(async () => { await initialize(); ensureContext(); syncRoute(); window
         <LandingView v-else-if="page === 'workbench'" :page="page" @navigate="navigate" />
         <DatasetLibrary v-else-if="page === 'mydatasets'" :mode="page" @navigate="navigate" />
         <div v-else-if="inGovernance" class="governance-shell">
-          <DatasetCatalog v-if="['catalog','square'].includes(page)" :key="page" :page="page==='square'?'plaza':'catalog'" @navigate="navigate" />
+          <DatasetCatalog v-if="['catalog','square'].includes(page)" :key="page" :page="page==='square'?'plaza':'catalog'" :focus="page==='square'?publicFocus:null" @navigate="navigate" />
           <GovernanceResults v-else-if="['audit','requests','services'].includes(page)" :key="page" :page="page==='audit'?'review':page" @navigate="navigate" />
           <GovernanceView v-else :key="page" :page="page" />
         </div>

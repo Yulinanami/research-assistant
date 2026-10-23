@@ -8,7 +8,7 @@ export const navigation = [
   { title:'数据治理与共享', items:[
     {id:'catalog',title:'数据目录',icon:'Collection'},
     {id:'square',title:'数据广场',icon:'Grid'},
-    {id:'standards',title:'数据标准与字典',icon:'Notebook'},
+    {id:'standards',title:'分类字典',icon:'Notebook'},
     {id:'audit',title:'数据质量审核',icon:'CircleCheck'},
     {id:'requests',title:'使用申请与审批',icon:'DocumentChecked'},
     {id:'services',title:'数据服务',icon:'Connection'},
@@ -292,16 +292,23 @@ function seedSampleRecordCounts(data, dataset) {
 
 
 export function addGovernanceDemoDatasets(data) {
+  for (const [id, obsolete, introduction] of [
+    ['governance-demo-metadata','会提示等级不在允许值内','整理科研文献的摘要、主题与来源，可用于主题分类和检索。'],
+    ['governance-demo-collection','会被“资料接入检查”阻止','包含上游和下游站点的水质观测记录，涵盖pH、溶解氧、采样日期和站点编号。'],
+  ]) {
+    const dataset=data.datasets.find(item=>item.id===id)
+    if (dataset?.introduction?.includes(obsolete)) dataset.introduction=introduction
+  }
   if (data.governanceDemoSeeded) return data
   const created = '2026/10/22 09:20:00'
   const samples = [
     { id:'governance-demo-metadata', name:'科研文献主题分类（元数据规范演示）', industry:'科研教育', level:'待定', source:'研究组文献整理清单',
       scene:'科研文献主题分类', demand:'整理文献摘要与主题，供科研检索使用。', tags:['科研文献','元数据规范'],
-      introduction:'整理科研文献的摘要、主题与来源，可用于主题分类和检索。此数据集尚未发布，数据等级暂为“待定”。在数据标准与字典中检查，或在项目中保存、发布时，会提示等级不在允许值内；编辑数据集，将等级改为“公开”或“内部”后可继续。',
+      introduction:'整理科研文献的摘要、主题与来源，可用于主题分类和检索。',
       records:[{title:'土壤含水量测定方法',content:'采用烘干法比较不同处理组土壤质量含水率。',reference:'研究组文献清单 · 001'},{title:'流域水质监测指标',content:'结合pH、溶解氧和氨氮指标描述监测站点的观测结果。',reference:'研究组文献清单 · 002'}] },
     { id:'governance-demo-collection', name:'流域水质观测资料（采集规范演示）', industry:'生态环境', level:'内部', source:'',
       scene:'流域监测资料接入', demand:'接入监测站观测记录，整理水质分析资料。', tags:['水质监测','采集规范'],
-      introduction:'包含上游和下游站点的水质观测内容，尚未填写数据来源。进入项目资料管理，上传普通TXT、JSON或CSV资料时，会被“资料接入检查”阻止；在项目数据集中补填来源，例如“流域监测站观测记录”，再接入即可继续。该数据集尚未发布。',
+      introduction:'包含上游和下游站点的水质观测记录，涵盖pH、溶解氧、采样日期和站点编号。',
       records:[{title:'上游站观测记录',content:'站点UP-01：pH为7.2，溶解氧8.1毫克/升，采样日期2026年9月12日。',reference:'待补充来源'},{title:'下游站观测记录',content:'站点DOWN-02：pH为7.0，溶解氧7.4毫克/升，采样日期2026年9月12日。',reference:'待补充来源'}] },
   ]
   for (const sample of samples) {
@@ -310,7 +317,7 @@ export function addGovernanceDemoDatasets(data) {
     const sourceId = `${sample.id}-source`
     data.datasets.push({...dataset,owner:data.role || '管理员',type:'文本',project:'规范约束演示',quality:'来源可追溯，内容准确完整',format:'JSON、Markdown',scale:100,status:'草稿',downloads:0,created})
     data.sources.push({id:sourceId,datasetId:sample.id,name:`${sample.scene}.json`,type:'JSON',content:JSON.stringify(records,null,2),status:'已接入',size:new TextEncoder().encode(JSON.stringify(records)).length,created})
-    data.versions.push({id:`${sample.id}-v1`,datasetId:sample.id,kind:'dataset',number:1,type:'条目导入',status:'已通过',records,sourceId,created,reviewNote:'内容审核通过，发布前需完成规范检查。'})
+    data.versions.push({id:`${sample.id}-v1`,datasetId:sample.id,kind:'dataset',number:1,type:'条目导入',status:'已通过',records,sourceId,created,reviewNote:'内容审核通过。'})
   }
   data.governanceDemoSeeded = true
   return data

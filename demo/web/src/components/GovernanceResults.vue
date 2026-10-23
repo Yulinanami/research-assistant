@@ -1,8 +1,8 @@
 <script setup>
-import { computed, ref, watch, onMounted, nextTick } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { state, previewService, recordUse, submitUsageRequest, approveUsageRequest, executeQualityCheck, checkGovernance, allowed, requireAction, datasetName, selectedVersions, addVersion, notify, review, publish, downloadVersion } from '../store'
-import { contentFieldsFor, qualityFingerprint, qualityGateIssues, updateQualityIssue, uid, now, canDownload, isDatasetVersion, isDatasetOwner } from '../domain'
+import { state, previewService, recordUse, submitUsageRequest, approveUsageRequest, allowed, requireAction, datasetName, selectedVersions, addVersion, notify, review, publish, downloadVersion } from '../store'
+import { uid, now, canDownload, isDatasetVersion, isDatasetOwner } from '../domain'
 import FormDialog from './GovernanceFormDialog.vue'
 const props = defineProps({ page: String })
 const emit=defineEmits(['navigate'])
@@ -17,13 +17,7 @@ const detailOpen = ref(false)
 const preview = ref('逐条预览')
 const recordIndex = ref(0)
 const reviewNote = ref('')
-const qualityPrompt = ref('')
-const reportId=ref('')
 const projectFilter=ref('')
-const issueDialog=ref(false)
-const issueFields=ref([])
-const issueInitial=ref({})
-const selectedIssue=ref(null)
 const requestTab = ref('我的申请')
 const requestDialog = ref(false)
 const requestVersion = ref(null)
@@ -62,24 +56,26 @@ const publishedVersions = computed(() => datasetVersions.value.filter(v => v.sta
 const selected = computed(() => visibleVersions.value.find(v => v.id === selectedId.value))
 const requests = computed(() => state.requests.filter(r => allowed('view', r.datasetId) && (requestTab.value === '待我审批' ? r.status === '待审批' : r.user === state.role) && (r.applicant + datasetName(r.datasetId)).includes(search.value)))
 const selectedDataset = computed(() => state.datasets.find(d => d.id === selected.value?.datasetId))
-const recordFields=computed(()=>contentFieldsFor(state,selectedDataset.value))
-const reports=computed(()=>state.qualityReports.filter(report=>report.versionId===selected.value?.id))
-const qualityReport=computed(()=>reports.value.find(report=>report.id===reportId.value) || reports.value[0])
-const reportCurrent=computed(()=>qualityReport.value && selected.value && qualityReport.value.fingerprint===qualityFingerprint(state,selected.value))
-const qualityHistory=computed(()=>qualityReport.value?.issues.flatMap(issue=>issue.history.map(entry=>({...entry,recordIndex:issue.recordIndex,fieldName:issue.fieldName}))) || [])
+const recordFields=computed(()=> {
+  const records=selected.value?.records || []
+  if (records.some(record=>record.question || record.content)) return []
+  return [...new Set(records.flatMap(record=>Object.keys(record)))].map(field=> {
+    const value=records.find(record=>record[field]!==null && record[field]!==undefined)?.[field]
+    return {id:field,field,name:field,type:typeof value==='number'?'数值':typeof value==='boolean'?'布尔':'文本'}
+  })
+})
 const downloadAllowed = version => allowed('download', version.datasetId) && canDownload(version, state.requests, state.role, state.datasets.find(d=>d.id===version.datasetId))
 watch(() => state.activeDataset, () => {
   const focus = selectedVersions().find(v => v.id === state.focusVersion)
   resultTab.value = focus && !isDatasetVersion(focus) ? '加工成果' : '数据集版本'
   selectedId.value = rows.value.find(v => v.id === state.focusVersion)?.id || rows.value[0]?.id || ''
-  recordIndex.value = 0; reportId.value = ''
+  recordIndex.value = 0
 }, { immediate: true })
 watch(resultTab, () => { if (!rows.value.some(v => v.id === selectedId.value)) selectedId.value = rows.value[0]?.id || '' })
-watch(selectedId, () => { recordIndex.value = 0; reviewNote.value = ''; reportId.value = ''; preview.value = '逐条预览' })
+watch(selectedId, () => { recordIndex.value = 0; reviewNote.value = ''; preview.value = '逐条预览' })
 watch([search, filter, catalogType, viewMode], () => { state.ui[props.page] = { search: search.value, filter: filter.value, catalogType: catalogType.value, viewMode: viewMode.value } })
 watch(() => state.role, () => { requestTab.value = '我的申请'; serviceResponse.value=null })
 watch([search,filter,projectFilter],()=>{if (props.page==='review' && !rows.value.some(row=>row.id===selectedId.value)) selectedId.value=rows.value[0]?.id || ''})
-onMounted(async()=>{const focus=state.focusQualityIssue;if (props.page==='versions' && focus?.versionId===selected.value?.id) {state.focusQualityIssue=null;await nextTick();editRecord(selected.value.records[focus.recordIndex],focus.recordIndex)}})
 function show(version) { selectedId.value = version.id; state.focusVersion = version.id; detailOpen.value = true }
 function submitReview(version) {
   if (!requireAction('edit', version.datasetId)) return
@@ -88,11 +84,11 @@ function submitReview(version) {
 function editRecord(record, index) {
   if (!requireAction('edit', selected.value.datasetId)) return
   editing.value = { record, index }
-  fields.value = recordFields.value.length ? recordFields.value.map(field=>({key:field.field,label:field.name+(field.unit?`（${field.unit}）`:''),type:field.allowedValues?'select':field.type==='数值'?'number':field.type==='布尔'?'switch':'textarea',options:String(field.allowedValues || '').split(/[,，\n]/).map(value=>value.trim()).filter(Boolean),min:-100000,max:1000000,required:field.required,rows:2})) : record.question ? [{ key: 'question', label: '问题', required: true, type: 'textarea' }, { key: 'answer', label: '回答', required: true, type: 'textarea', rows: 6 }, { key: 'reference', label: '参考材料', type: 'textarea' }] : [{ key: 'title', label: '标题' }, { key: 'content', label: '内容', required: true, type: 'textarea', rows: 10 }]
+  fields.value = recordFields.value.length ? recordFields.value.map(field=>({key:field.field,label:field.name,type:field.type==='数值'?'number':field.type==='布尔'?'switch':'textarea',min:Number.MIN_SAFE_INTEGER,max:Number.MAX_SAFE_INTEGER,rows:2})) : record.question ? [{ key: 'question', label: '问题', required: true, type: 'textarea' }, { key: 'answer', label: '回答', required: true, type: 'textarea', rows: 6 }, { key: 'reference', label: '参考材料', type: 'textarea' }] : [{ key: 'title', label: '标题' }, { key: 'content', label: '内容', required: true, type: 'textarea', rows: 10 }]
   editDialog.value = true
 }
 function saveRecord(data) {
-  if (!checkGovernance('save',{datasetId:selected.value.datasetId})) return
+  if (!requireAction('edit',selected.value.datasetId)) return
   const version = selected.value
   if (['已发布', '已通过', '待审核'].includes(version.status)) {
     const records = JSON.parse(JSON.stringify(version.records)); records[editing.value.index] = { ...records[editing.value.index], ...data }
@@ -111,29 +107,8 @@ async function approve(request,pass) {
   try {const {value}=await ElMessageBox.prompt(pass?'填写审批意见':'填写驳回原因',pass?'通过申请':'驳回申请',{inputPlaceholder:'审批意见',inputValidator:value=>Boolean(value?.trim()) || '请填写审批意见',confirmButtonText:'确认',cancelButtonText:'取消'});approveUsageRequest(request,pass,value)} catch {}
 }
 
-function qualityCheck() {
-  try {const report=executeQualityCheck(selected.value,qualityPrompt.value);if (report) reportId.value=report.id}
-  catch (error) {ElMessage.warning(error.message)}
-}
-function openIssue(issue,manual=false) {
-  if (!requireAction(manual?'review':'edit',selected.value.datasetId)) return
-  selectedIssue.value=issue
-  issueFields.value=[{key:'owner',label:'处理负责人',required:true},{key:'note',label:manual?'复核意见':'处理说明',type:'textarea',required:manual}]
-  if (manual) issueFields.value.push({key:'resolution',label:'复核结论',type:'select',options:['确认无误','需要修正'],required:true})
-  issueInitial.value={owner:issue.owner,note:issue.note,resolution:manual?'确认无误':''};issueDialog.value=true
-}
-function saveIssue(details) {
-  try {updateQualityIssue(qualityReport.value,selectedIssue.value.id,details,state.role);issueDialog.value=false;notify('问题处理记录已保存')}
-  catch (error) {ElMessage.warning(error.message)}
-}
-function repairIssue(issue) {
-  if (!requireAction('edit',selected.value.datasetId)) return
-  editRecord(selected.value.records[issue.recordIndex],issue.recordIndex)
-}
-
 function addService(version) {
   if (!requireAction('edit', version.datasetId)) return
-  if (!checkGovernance('publish',{datasetId:version.datasetId,versionId:version.id})) return
   const existing = state.services.find(s => s.versionId === version.id)
   if (existing) { serviceDetail.value = existing; return }
   const service = { createdBy:state.role,id: uid('service'), datasetId: version.datasetId, versionId: version.id, version: version.number, name: datasetName(version.datasetId), path: `/api/demo/datasets/${version.datasetId}/versions/${version.number}/records`, method: 'GET', status: '已生成', created: now() }
@@ -174,20 +149,10 @@ async function copy(text) { try { await navigator.clipboard.writeText(text); ElM
       </article><el-empty v-if="!selected.records.length" description="本次没有可处理的图片" />
     </section>
     <pre v-else-if="preview === 'JSON'">{{ JSON.stringify(selected.records, null, 2) }}</pre><pre v-else-if="preview === 'Markdown'">{{ selected.records.map(r => r.question ? `## ${r.question}\n\n${r.correctedAnswer || r.answer}` : `## ${r.title || '内容'}\n\n${r.content || JSON.stringify(r)}`).join('\n\n') }}</pre><div v-else-if="preview === '处理前后对比'" class="two-cols"><div><h4>处理前</h4><pre>{{ selected.records[0]?.before }}</pre></div><div><h4>处理后</h4><pre>{{ selected.records[0]?.content }}</pre></div></div><el-table v-else-if="recordFields.length && !selected.records.some(record=>record.question || record.content)" :data="selected.records" class="structured-records"><el-table-column type="index" label="记录" width="70" /><el-table-column v-for="field in recordFields" :key="field.id" :label="field.name+(field.unit?'（'+field.unit+'）':'')" min-width="140"><template #default="{row}">{{ row[field.field] ?? '—' }}</template></el-table-column><el-table-column label="操作" width="100"><template #default="{row,$index}"><el-button link type="primary" :disabled="!allowed('edit',selected.datasetId)" @click="editRecord(row,$index)">编辑内容</el-button></template></el-table-column></el-table><template v-else><div class="record-list"><article v-for="(record, i) in selected.records" :key="i" class="record-preview"><div class="record-header"><span>记录 {{ i + 1 }}</span><el-button link type="primary" :disabled="!allowed('edit', selected.datasetId)" @click="editRecord(record, i)">编辑内容</el-button></div><template v-if="record.question"><h4>{{ record.question }}</h4><p>{{ record.correctedAnswer || record.answer }}</p><div class="record-reference">参考材料：{{ record.reference || '未提供' }}</div><el-tag v-if="record.label">{{ record.label }}</el-tag><span v-if="record.rating" class="muted"> · 评分 {{ record.rating }}/5</span><el-tag v-if="record.suggestion" type="warning">模型建议：{{ record.suggestion }}</el-tag></template><template v-else><h4>{{ record.title || '内容' }}</h4><pre>{{ record.content || JSON.stringify(record, null, 2) }}</pre><div v-if="record.table" class="two-cols"><div><h4>表格</h4><table class="sample-table"><tbody><tr><th>实验组</th><th>土壤含水量</th></tr><tr><td>A组</td><td>20%</td></tr><tr><td>B组</td><td>25%</td></tr></tbody></table></div><div><h4>公式与图片引用</h4><p>{{ record.formula }}</p><p>{{ record.image }}</p></div></div></template></article></div></template>
-    <section v-if="isDatasetVersion(selected)" class="quality-workspace">
-      <div class="section-title"><h3><el-icon><CircleCheck /></el-icon>数据质量</h3><el-button type="primary" @click="qualityCheck"><el-icon><Search /></el-icon>执行质量检查</el-button></div>
-      <div class="toolbar"><el-tag v-if="selectedDataset.fieldTemplateId">{{ state.fieldTemplates.find(template=>template.id===selectedDataset.fieldTemplateId)?.name }}</el-tag><span v-else>未绑定内容标准，请在项目数据集设置中选择</span><el-select v-if="reports.length" :model-value="qualityReport?.id" @update:model-value="reportId=$event" placeholder="选择历史报告" aria-label="质量报告"><el-option v-for="report in reports" :key="report.id" :value="report.id" :label="report.created+' · '+report.issues.length+'个问题'" /></el-select></div>
-      <el-collapse><el-collapse-item title="字段规则与补充人工复核" name="rules"><el-table :data="recordFields"><el-table-column label="字段" prop="name" /><el-table-column label="类型" prop="type" width="100" /><el-table-column label="检查规则" min-width="250"><template #default="{row}">{{ [row.required?'必填':'',row.unique?'唯一':'',row.checkRange?`${row.min}—${row.max}${row.unit || ''}`:'',row.allowedValues?`允许：${row.allowedValues}`:''].filter(Boolean).join('、') }}</template></el-table-column></el-table><el-input v-model="qualityPrompt" type="textarea" :rows="2" placeholder="补充需要逐条人工复核的内容，例如：核对回答是否有来源依据" /></el-collapse-item></el-collapse>
-      <template v-if="qualityReport"><div class="quality-summary"><span>检查 {{ qualityReport.total }} 条</span><span>初检无问题 {{ qualityReport.passed }} 条</span><span>发现 {{ qualityReport.issues.length }} 个问题</span><el-tag :type="reportCurrent?'success':'warning'">{{ reportCurrent?'报告与当前内容、规则一致':'内容或规则已变更，需复检' }}</el-tag></div>
-        <el-table :data="qualityReport.issues" max-height="430" empty-text="本次检查未发现问题" class="quality-issues"><el-table-column label="记录" width="70"><template #default="{row}">{{ row.recordIndex+1 }}</template></el-table-column><el-table-column label="字段" prop="fieldName" min-width="120" /><el-table-column label="问题 / 检查值" min-width="220"><template #default="{row}"><div>{{ row.reason }}</div><span class="muted">{{ row.value }}</span></template></el-table-column><el-table-column label="等级" prop="severity" width="80" /><el-table-column label="负责人" prop="owner" width="110" /><el-table-column label="处理情况" min-width="150"><template #default="{row}"><el-tag :type="row.status==='已确认' || row.status==='已复检修复'?'success':'warning'">{{ row.status }}</el-tag><div v-if="row.resolvedInVersionId" class="muted">修复于 V{{ state.versions.find(version=>version.id===row.resolvedInVersionId)?.number }}</div><div v-if="row.note">{{ row.note }}</div></template></el-table-column><el-table-column label="操作" width="180"><template #default="{row}"><el-button link type="primary" :disabled="!allowed('edit',selected.datasetId)" @click="openIssue(row)">指派</el-button><el-button v-if="row.kind==='manual'" link type="primary" :disabled="!allowed('review',selected.datasetId) || !reportCurrent" @click="openIssue(row,true)">复核</el-button><el-button v-if="!['已确认','已复检修复'].includes(row.status)" link type="primary" :disabled="!allowed('edit',selected.datasetId) || !reportCurrent" @click="repairIssue(row)">修正</el-button></template></el-table-column></el-table>
-        <el-collapse><el-collapse-item title="本次规则与处理记录" name="snapshot"><el-table :data="qualityReport.rules"><el-table-column label="检查字段" prop="name" /><el-table-column label="类型" prop="type" width="100" /><el-table-column label="本次采用的约束" min-width="300"><template #default="{row}">{{ [row.required?'必填':'',row.unique?'唯一':'',row.checkRange?`${row.min}—${row.max}${row.unit || ''}`:'',row.allowedValues?`允许：${row.allowedValues}`:''].filter(Boolean).join('、') }}</template></el-table-column></el-table><el-table v-if="qualityHistory.length" :data="qualityHistory"><el-table-column label="记录" width="70"><template #default="{row}">{{ row.recordIndex+1 }}</template></el-table-column><el-table-column label="字段" prop="fieldName" /><el-table-column label="处理人" prop="operator" /><el-table-column label="负责人" prop="owner" /><el-table-column label="操作" prop="resolution" /><el-table-column label="意见" prop="note" min-width="200" /><el-table-column label="时间" prop="created" min-width="170" /></el-table></el-collapse-item></el-collapse>
-      </template>
-    </section>
     <div v-if="page==='review'" class="review-controls"><h3>人工审核</h3><el-input v-model="reviewNote" type="textarea" :rows="2" placeholder="填写审核意见或退回原因" /><div class="dialog-actions"><el-button type="danger" plain :disabled="selected.status!=='待审核' || !allowed('review')" @click="reviewNote.trim()?review(selected,false,reviewNote):ElMessage.warning('请填写退回原因')">退回修改</el-button><el-button type="primary" :disabled="selected.status!=='待审核' || !allowed('review')" @click="review(selected,true,reviewNote || '已核对内容与来源')">审核通过</el-button><el-button v-if="selected.status==='已通过'" type="success" :disabled="!allowed('review')" @click="openRelease(selected)">发布此版本</el-button></div></div>
   </section>
 
   <el-drawer v-model="detailOpen" :title="selected ? datasetName(selected.datasetId) : '成果详情'" size="700"><template v-if="selected"><div class="detail-badges"><el-tag type="success">{{ selected.status }}</el-tag><el-tag type="info">{{ resultLabel(selected) }}</el-tag><el-tag>{{ (selected.totalRecords ?? selected.records.length).toLocaleString() }} 条</el-tag></div><section v-if="selected.release" class="release-info"><div class="release-info-heading"><el-tag type="success">{{ selected.release.tag }}</el-tag><span>数据快照 V{{ selected.number }}</span></div><h3>{{ selected.release.title }}</h3><p class="release-meta">{{ selected.release.publisher }} 发布于 {{ selected.release.publishedAt }}</p><div class="release-notes">{{ selected.release.notes }}</div></section><div v-else-if="selected.status === '已发布'" class="release-legacy"><span>此历史发布尚未填写Tag、标题和说明。</span><el-button v-if="allowed('review', selected.datasetId)" link type="primary" @click="openRelease(selected)">补充发布信息</el-button></div><h3>数据集介绍</h3><p>{{ selectedDataset?.demand }}</p><el-descriptions :column="1" border><el-descriptions-item label="数据集编号">{{ selectedDataset?.code }}</el-descriptions-item><el-descriptions-item label="使用场景">{{ selectedDataset?.scene }}</el-descriptions-item><el-descriptions-item label="所属项目">{{ selectedDataset?.project }}</el-descriptions-item><el-descriptions-item label="数据等级">{{ selectedDataset?.level }}</el-descriptions-item><el-descriptions-item label="质量要求">{{ selectedDataset?.quality }}</el-descriptions-item><el-descriptions-item label="来源">{{ selectedDataset?.source }}</el-descriptions-item><el-descriptions-item label="审核意见">{{ selected.reviewNote || '尚无审核意见' }}</el-descriptions-item></el-descriptions><h3>逐条数据预览</h3><el-pagination :current-page="Math.max(1, recordIndex)" :page-count="selected.records.length" :default-current-page="1" layout="prev, pager, next" @current-change="recordIndex = $event" /><pre>{{ JSON.stringify(selected.records[Math.max(0, recordIndex - 1)], null, 2) }}</pre><h3>文件列表</h3><div class="file-list" v-for="file in state.sources.filter(s => s.datasetId === selected.datasetId)" :key="file.id"><el-icon><Document /></el-icon>{{ file.name }}<el-tag type="info">{{ file.type }}</el-tag></div><div class="dialog-actions" v-if="selected.status === '已发布'"><el-button v-if="!isDatasetOwner(selectedDataset,state.role) && !downloadAllowed(selected)" type="primary" @click="apply(selected)">申请使用此版本</el-button><el-button :disabled="!downloadAllowed(selected)" type="primary" @click="downloadVersion(selected)"><el-icon><Download /></el-icon>下载成果JSON</el-button><el-button :disabled="!downloadAllowed(selected)" @click="downloadVersion(selected, 'md')">下载Markdown</el-button></div><p class="muted" v-if="selected.status === '已发布' && !isDatasetOwner(selectedDataset,state.role) && !downloadAllowed(selected)">下载需先完成当前版本的使用审批。</p></template></el-drawer>
-  <FormDialog v-model="issueDialog" title="处理质量问题" :fields="issueFields" :initial="issueInitial" @save="saveIssue" />
   <FormDialog v-model="releaseDialog" :title="releaseVersion?.status === '已发布' ? '补充发布信息' : '发布数据集'" :fields="releaseFields" :initial="releaseVersion ? { tag: `v${releaseVersion.number}.0.0`, title: `${datasetName(releaseVersion.datasetId)} · 第${releaseVersion.number}版`, notes: '' } : {}" :confirm-text="releaseVersion?.status === '已发布' ? '保存发布信息' : '确认发布'" @save="saveRelease" />
   <FormDialog v-model="requestDialog" title="申请使用数据" :fields="requestFields" :initial="{ applicant: state.role }" confirm-text="提交申请" @save="sendRequest" />
   <FormDialog v-model="editDialog" title="修改成果内容" :fields="fields" :initial="editing?.record" @save="saveRecord" />
